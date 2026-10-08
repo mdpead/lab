@@ -19,14 +19,9 @@ def make_kv_cache(model, batches, seq_length, device):
 
 
 def blocked_token_ids(tokenizer, device):
-    """Ids sampling never draws: <bos>, <pad> and <unk>.
+    """Ids sampling never draws: <bos>, <pad> and <unk>. <eos> is allowed, so the model can stop.
 
-    Framing generate writes and decoding strips, so sampling one would train on a token
-    that never appears in the text being scored. <eos> is deliberately not here: stopping
-    is a real choice, and masking it off is how a model learns to never stop.
-
-    Its own function because the policy gradient has to rescore rollouts under exactly the
-    distribution they were drawn from, and that distribution has these removed.
+    Shared with the policy gradient, which must rescore under the same distribution.
     """
     blocked = [tokenizer.bos_token_id, tokenizer.pad_token_id, tokenizer.unk_token_id]
     return torch.tensor([i for i in blocked if i is not None], device=device)
@@ -36,30 +31,15 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
     """Continue each prompt, returning (token_ids, completion_mask, logprobs, seq_starts,
     finished).
 
-    `token_ids` is (batch, length): each row is <bos>, the prompt, and its continuation,
-    left-padded so every row's real tokens end flush against the same right-hand edge and
-    right-padded from wherever that row stopped. `completion_mask` is True exactly where
-    the model chose the token — the continuation up to and including its <eos> — and False
-    on the prompt and on padding at either end, none of which the model decided.
-    `seq_starts` is each row's first real column, which a caller that feeds these ids back
-    through the model must pass to see the same context generation saw. `finished[i]` is
-    True when row i stopped on <eos> rather than running out of budget, which is the
-    difference between a wrong answer and a truncated one.
+    - `token_ids` (batch, length): <bos>, prompt and continuation, left-padded so prompts
+      end on the same column and right-padded after a row stops.
+    - `completion_mask`: True where the model chose the token, its <eos> included.
+    - `logprobs`: log-probability of each drawn token under the sampling distribution.
+      None under a greedy decode, so training on it fails rather than computing nonsense.
+    - `seq_starts`: each row's first real column, needed to feed the ids back to the model.
+    - `finished`: True when a row stopped on <eos> rather than running out of budget.
 
-    `logprobs` is the log-probability the sampling distribution gave the token actually
-    drawn, which a policy gradient needs to weigh an updated policy against the one that
-    produced the rollout. It is None under a greedy decode: the distribution there is
-    degenerate, so every drawn token has log-probability 0, and a caller that trains on
-    that would silently compute nonsense ratios. None makes the misuse fail instead.
-
-    `temperature` defaults to 0, meaning greedy: eval wants the model's best guess, and it
-    wants it reproducible and independent of how rows were batched, neither of which
-    survives sampling. RL passes a temperature explicitly, because a policy gradient needs
-    rollouts drawn from the policy rather than one deterministic answer per prompt.
-
-    Token ids rather than text is the useful boundary: decoding is lossy for anything that
-    needs to line up with the tokens the model actually emitted, so callers that score or
-    train on the rollout work from here and generate_texts decodes on top.
+    `temperature` 0 means greedy, which is reproducible and independent of batching.
     """
     if temperature < 0:
         raise ValueError(f"temperature must be >= 0, got {temperature}")
@@ -70,8 +50,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
     prompt_ids = tokenizer(input_texts, add_special_tokens=False)["input_ids"]
     prompt_ids = [[tokenizer.bos_token_id] + ids for ids in prompt_ids]
 
-    # A prompt that needs truncating would fill the context outright, leaving nothing to
-    # generate, so trimming it only corrupts the input for no gain. Refuse instead.
+    # A prompt over the context cannot be generated from, so refuse rather than truncate
     over = [len(ids) for ids in prompt_ids if len(ids) > max_length]
     if over:
         raise ValueError(
@@ -86,8 +65,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
     room = max_length - input_length
     new_tokens = room if max_new_tokens is None else min(max_new_tokens, room)
     if new_tokens < 1:
-        # The prompt fills the context, so there is genuinely nothing to generate. Hand
-        # back the prompts rather than stealing a token from them to manufacture output.
+        # The prompt fills the context: hand back the prompts unchanged
         warnings.warn(f"prompt fills {input_length} of {max_length} tokens, generating nothing")
     elif max_new_tokens is not None and new_tokens < max_new_tokens:
         warnings.warn(
@@ -95,8 +73,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
             f"the prompt uses {input_length} of {max_length} tokens"
         )
 
-    # Left padding puts every row's real tokens flush against the same right-hand edge, so
-    # the batch shares one frontier and each row's pads form a leading block
+    # Left padding gives the batch one shared frontier
     seq_starts = (input_length - encoded["attention_mask"].sum(dim=-1)).to(
         device=device, dtype=torch.int32
     )  # (batch,) first real column
@@ -109,7 +86,6 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
     blocked = blocked_token_ids(tokenizer, device)
 
-    # Make kv cache
     kv_cache = make_kv_cache(model, batch_size, input_length + new_tokens, device)
 
     num_cached = 0
@@ -127,17 +103,13 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
             # Choose the next token
             if temperature > 0:
-                # bf16 carries ~3 significant digits, so softmaxing in it collapses the
-                # tail of the vocabulary onto a handful of values and skews the draw
+                # fp32: bf16 collapses the tail of the vocabulary and skews the draw
                 step_logits = logits[:, -1, :].float()
                 step_logits[:, blocked] = -float("inf")
-                # One log_softmax rather than a softmax beside it: exp recovers the
-                # probabilities multinomial wants, and the log form is what RL scores with
                 step_logprobs = F.log_softmax(step_logits / temperature, dim=-1)
                 pred_token_ids = torch.multinomial(step_logprobs.exp(), num_samples=1).squeeze(-1)
-                # Gathered before the <pad> overwrite below, whose logit is -inf: the mask
-                # excludes those positions anyway, but -inf * False is nan, not 0, so a
-                # single finished row would poison any sum a caller takes over the mask.
+                # Gathered before the <pad> overwrite below, whose logprob is -inf and
+                # would turn a masked sum into nan
                 logprobs[:, cur_length] = step_logprobs.gather(
                     1, pred_token_ids[:, None]
                 ).squeeze(1)
@@ -146,9 +118,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
             pred_token_ids = torch.where(finished, tokenizer.pad_token_id, pred_token_ids)
 
             token_ids[:, cur_length] = pred_token_ids
-            # finished still describes the state before this token, so ~finished marks the
-            # rows that were genuinely choosing here — its own <eos> included, since
-            # stopping is a decision — and masks off the filler after a row is done.
+            # finished is the state before this token, so a row's own <eos> counts as chosen
             completion_mask[:, cur_length] = ~finished
             num_cached = cur_length
             cur_length += 1
@@ -159,8 +129,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
     model.train(training)
 
-    # Trimmed to what was actually written: the buffer is sized for the full budget, but
-    # an all-finished batch stops early and the tail is pad the caller never asked for.
+    # Trim to what was written: an all-finished batch stops before the buffer is full
     if logprobs is not None:
         logprobs = logprobs[:, :cur_length]
     return (
@@ -173,17 +142,10 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
 
 def decode_rollouts(tokenizer, token_ids):
-    """Decode rows of token ids to text, dropping only this module's own framing.
+    """Decode rows of token ids to text, dropping only <bos>, <pad> and <eos>.
 
-    <bos> is prepended by generate, <pad> fills the left padding and every position after a
-    row finished, and <eos> is the stop signal, reported separately as `finished`. Anything
-    else the model emitted survives — the reasoning markers included, which callers split on
-    to find the answer and could not recover once stripped. That is what skip_special_tokens
-    would take with it, which is why it stays False and the three are filtered by hand.
-
-    Leaving them in is not harmless: a rollout that hit its token budget mid-answer has no
-    closing marker to bound the answer, so the <eos> lands inside it and ast.literal_eval
-    rejects a value that was otherwise correct — scoring a truncation as a wrong answer.
+    Filtered by hand rather than with skip_special_tokens, which would also strip the
+    reasoning markers callers split on. A stray <eos> would break parsing of the answer.
     """
     framing = {tokenizer.bos_token_id, tokenizer.pad_token_id, tokenizer.eos_token_id}
     return [
@@ -193,12 +155,10 @@ def decode_rollouts(tokenizer, token_ids):
 
 
 def generate_texts(model, tokenizer, input_texts, device, max_new_tokens=None):
-    """Decode generate's rollouts, returning (texts, finished).
+    """Greedy-decode each prompt, returning (texts, finished).
 
-    Each text is the prompt plus its continuation, with this function's own framing —
-    <bos>, padding, <eos> — removed and everything else the model emitted left intact.
-    `finished[i]` is True when row i stopped on <eos> rather than running out of budget,
-    which is the difference between a wrong answer and a truncated one.
+    Each text is the prompt plus its continuation. `finished[i]` is True when row i
+    stopped on <eos> rather than running out of budget.
     """
     token_ids, _, _, _, finished = generate(
         model, tokenizer, input_texts, device, max_new_tokens
@@ -206,9 +166,4 @@ def generate_texts(model, tokenizer, input_texts, device, max_new_tokens=None):
 
     texts = decode_rollouts(tokenizer, token_ids)
 
-    # Whether each row stopped on <eos> rather than exhausting its budget, returned rather
-    # than left in the text. A truncated rollout is a different failure from a completed
-    # one that answered wrongly, and the alternative — reading it back out of the string —
-    # is what breaks scoring, since ast.literal_eval rejects an answer with <eos> stuck to
-    # it. finished is already tracked to halt decoding, so carrying it out costs nothing.
     return texts, finished.tolist()

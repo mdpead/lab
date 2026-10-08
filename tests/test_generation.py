@@ -1,8 +1,7 @@
 """Generation budget rules and batch independence.
 
-Weights are random, so the generated TEXT is meaningless. These assert the contract:
-the prompt is never modified, max_new_tokens only ever reduces output, and a row's
-result does not depend on what it was batched with.
+Weights are random, so these assert the contract: the prompt is never modified,
+max_new_tokens only reduces output, and a row does not depend on its batchmates.
 """
 
 import math
@@ -39,8 +38,7 @@ def test_respects_max_new_tokens(model, tokenizer):
 
 
 def test_output_is_independent_of_batchmates(model, tokenizer):
-    """A short prompt gets a leading pad block when batched with a long one; with an
-    explicit budget its result must be identical to running it alone."""
+    """With an explicit budget, a row's result is the same batched as alone."""
     short, long = "hello", "the quick brown fox jumps over foo bar baz"
     alone = generate_texts(model, tokenizer, [short], DEV, max_new_tokens=15)[0][0]
     batched = generate_texts(model, tokenizer, [long, short], DEV, max_new_tokens=15)[0][1]
@@ -48,8 +46,7 @@ def test_output_is_independent_of_batchmates(model, tokenizer):
 
 
 def test_uncapped_budget_depends_on_batch(model, tokenizer):
-    """Documented consequence of the shared frontier: with no cap, the longest prompt
-    in the batch sets everyone's budget. Pass max_new_tokens to avoid it."""
+    """With no cap, the longest prompt in the batch sets everyone's budget."""
     short, long = "hello", "the quick brown fox jumps over foo bar baz"
     alone = generate_texts(model, tokenizer, [short], DEV)[0][0]
     batched = generate_texts(model, tokenizer, [long, short], DEV)[0][1]
@@ -57,15 +54,9 @@ def test_uncapped_budget_depends_on_batch(model, tokenizer):
 
 
 def test_framing_tokens_are_stripped_from_the_text(model, tokenizer):
-    """bos, padding and eos are this function's framing, not model output.
+    """<bos>, padding and <eos> are framing, not model output.
 
-    A caller cannot remove them safely once they are in the string: scoring a rollout
-    means ast.literal_eval on the answer, and an <eos> stuck to it is a SyntaxError.
-
-    All three are forced into the stream rather than hoped for — bos is always prepended,
-    batching a short prompt with a long one produces the left padding, and <eos> is put in
-    a prompt, which the returned text echoes. Waiting for the model to emit <eos> on its
-    own would pass whether or not it is stripped, since random weights rarely reach it.
+    All three are forced into the stream, since random weights rarely emit <eos>.
     """
     short = f"hello {tokenizer.eos_token} world"
     long = "the quick brown fox jumps over foo bar baz"
@@ -79,12 +70,7 @@ def test_framing_tokens_are_stripped_from_the_text(model, tokenizer):
 
 
 def test_other_special_tokens_survive_generation(model, tokenizer):
-    """Reasoning markers ride in the text and callers split on them, so generation must
-    not skip special tokens wholesale — only the three framing ones go, dropped by id.
-
-    Driven through the prompt because the returned text echoes it: a decode that skipped
-    special tokens would erase the marker from that echo, whatever the model then emits.
-    """
+    """Reasoning markers survive: only the three framing tokens are dropped, by id."""
     marker = "<|think|>"
     assert len(tokenizer(marker, add_special_tokens=False)["input_ids"]) == 1
 
@@ -142,10 +128,8 @@ def test_no_grad_leaks(model, tokenizer):
 
 
 def test_cached_logits_match_uncached_forward(model, tokenizer):
-    """The kv cache is an optimization, not a model change: at every step, decoding
-    with the cache must produce the same logits as a full no-cache forward over the
-    same prefix. The behavioral tests above cannot see a cache that is consistently
-    wrong (bad RoPE offset, misaligned mask, stale entries); this one can."""
+    """Decoding with the kv cache gives the same logits, at every step, as a full
+    forward over the same prefix."""
     prompts = ["hello", "the quick brown fox jumps over"]
     prompt_ids = tokenizer(prompts, add_special_tokens=False)["input_ids"]
     prompt_ids = [[tokenizer.bos_token_id] + ids for ids in prompt_ids]
@@ -178,17 +162,12 @@ def test_cached_logits_match_uncached_forward(model, tokenizer):
             step = cur_length - input_length
             assert err / scale < 1e-2, f"step {step}: cached logits diverge, rel {err / scale:.4g}"
 
-            # Both paths continue from the reference's greedy token, so any divergence
-            # is attributable to this step alone rather than a drifted prefix.
+            # Both paths continue from the reference's token, so a divergence is this step's
             token_ids[:, cur_length] = b.argmax(dim=-1)
 
 
 def test_completion_mask_marks_only_generated_tokens(model, tokenizer):
-    """True exactly where the model chose the token, so a row's True columns form one run.
-
-    Prompt and padding are False because nothing was decided there, and left padding sits
-    left of the shared frontier where every prompt ends, so the run starts there.
-    """
+    """True exactly where the model chose the token, so a row's True columns form one run."""
     prompts = ["hello", "the quick brown"]
     input_length = 1 + max(n_tokens(tokenizer, p) for p in prompts)  # +1 for <bos>
 
@@ -204,11 +183,7 @@ def test_completion_mask_marks_only_generated_tokens(model, tokenizer):
 
 
 def force_eos_at(model, tokenizer, monkeypatch, row, step):
-    """Make one row emit <eos> on a chosen step, whatever the random weights wanted.
-
-    Untrained weights never stop on their own, so without this the mask's <eos> handling —
-    the part RL depends on — is only ever exercised on rows that ran out of budget.
-    """
+    """Make one row emit <eos> on a chosen step, which untrained weights never do unaided."""
     forward = model.forward
     calls = {"n": 0}
 
@@ -273,8 +248,7 @@ def test_sampling_varies_with_the_seed(model, tokenizer):
 
 
 def test_sampling_never_draws_framing_tokens(model, tokenizer):
-    """<bos>, <pad> and <unk> are stripped at decode, so sampling one would train on a
-    token absent from the text being scored. <eos> stays drawable: stopping is a choice."""
+    """<bos>, <pad> and <unk> are never sampled; <eos> stays drawable."""
     token_ids, mask, _, _, _ = generate(
         model, tokenizer, ["hello", "the quick brown"], DEV, max_new_tokens=30, temperature=1.0
     )
@@ -292,8 +266,7 @@ def test_negative_temperature_is_rejected(model, tokenizer):
 
 
 def test_logprobs_only_come_back_from_a_sampled_decode(model, tokenizer):
-    """Greedy has no meaningful behaviour policy to score against, so it returns None
-    rather than a buffer of zeros a caller could quietly train on."""
+    """Greedy returns None for logprobs rather than zeros a caller could train on."""
     greedy = generate(model, tokenizer, ["hello"], DEV, max_new_tokens=4)
     assert greedy[2] is None
 
@@ -305,8 +278,7 @@ def test_logprobs_only_come_back_from_a_sampled_decode(model, tokenizer):
 
 
 def test_logprobs_score_the_token_actually_drawn(model, tokenizer):
-    """A near-zero temperature makes each draw near-certain, so the gathered log-prob has
-    to be near log(1) — which it only is if the gather lines up with the sampled token."""
+    """At near-zero temperature each draw is near-certain, so its log-prob is near 0."""
     prompts = ["hello", "the quick brown"]
     sampled, mask, logprobs, _, _ = generate(
         model, tokenizer, prompts, DEV, max_new_tokens=6, temperature=0.01
@@ -319,9 +291,7 @@ def test_logprobs_score_the_token_actually_drawn(model, tokenizer):
 
 
 def test_a_finished_row_leaves_no_infinite_logprob(model, tokenizer, monkeypatch):
-    """<pad> is masked to -inf, and a finished row is filled with <pad>. Scoring the draw
-    before that overwrite is what keeps -inf out: -inf * False is nan, not 0, so one
-    finished row would otherwise poison any sum a caller takes over the mask."""
+    """A finished row's <pad> filler, masked to -inf, never reaches the logprobs."""
     force_eos_at(model, tokenizer, monkeypatch, row=0, step=2)
 
     _, mask, logprobs, _, finished = generate(

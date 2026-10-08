@@ -1,34 +1,21 @@
 name: base
 seed: 0
 
-# Sized for a 16GB card (RTX 5070 Ti desktop). The laptop config is memory-bound at 8GB;
-# this card has twice the VRAM and roughly 2.5x the throughput, so both levers move and
-# this is a larger model on a correspondingly larger token budget rather than the same
-# model run faster. 352M total params at 16 bytes each (fp32 master + grad + two Adam
-# moments under AMP) is 5.6GB of persistent state before a single activation; confirm the
-# peak with torch.cuda.max_memory_allocated() over a few hundred steps before committing
-# to a full run, and raise minibatch_token_size if there is headroom.
+# Sized for a 16GB card (RTX 5070 Ti). 352M total params is 5.6GB of persistent state under
+# AMP before any activation. Check the peak over a few hundred steps before a full run.
 model:
   d_model: 1024
   num_heads: 16
   num_kv_heads: 4    # GQA: groups of 4 query heads share a K/V head
   d_h: 64            # num_heads * d_h == d_model, so attention doesn't bottleneck
-  max_length: 1024   # Matches the laptop config: at 512, 19% of medium-tier and 65% of
-                     # hard-tier synth traces overflow the context, and RL rollouts need
-                     # headroom above that again.
-  d_ff: 1408         # 11 * 128, so tensor-core aligned; with top_k 2 the effective FFN
-                     # width per token is 2816, or 2.75x d_model, matching the laptop ratio
-  num_experts: 4     # Not 8, even with the extra VRAM: optimiser state is charged on total
-                     # params, not active, and 8 experts at this d_model would be 628M
-                     # total (10GB of state). At 16GB you get wider MoE or wider dense
-                     # dims, not both, and the dense dims also buy compute-optimal scale.
+  max_length: 1024   # at 512, 19% of medium-tier and 65% of hard-tier traces overflow
+  d_ff: 1408         # 11 * 128; with top_k 2 the effective FFN width is 2.75x d_model
+  num_experts: 4     # 8 would be 628M total params, 10GB of optimiser state
   top_k: 2           # experts active per token (Mixtral-style)
-  capacity_factor: 1.25  # rows each expert reserves, as a multiple of its balanced share
-                         # (n * top_k / num_experts). The padding is computed and discarded,
-                         # so this is ~25% wasted FFN FLOPs bought against router imbalance;
-                         # tighten toward 1.1 once the realised max load is known.
-  num_layers: 16     # d_model / num_layers == 64, the same aspect ratio as the laptop
-  dropout: 0.0       # single pass over a large corpus, so no regularisation needed
+  capacity_factor: 1.25  # rows each expert reserves, as a multiple of its balanced share.
+                         # ~25% padded FFN compute against router imbalance.
+  num_layers: 16
+  dropout: 0.0       # single pass over a large corpus
 
 train:
   pretrain:
@@ -37,136 +24,89 @@ train:
     learning_rate: 7.0e-4          # 1 / sqrt(d_model * warm_up_steps)
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 35000               # ~4.6B tokens against 213M active params, so ~21.5 per
-                                   # active param — near the Chinchilla point for the ~3.7x
-                                   # larger compute budget this card affords
+    num_steps: 35000               # ~4.6B tokens, ~21.5 per active param
     label_smoothing: 0.0
-    router_aux_loss_coef: 0.01     # weight on the MoE load-balancing loss (Switch Transformer default)
+    router_aux_loss_coef: 0.01     # weight on the MoE load-balancing loss
     device: cuda
-    checkpoint_steps: 5000         # 4.2GB per checkpoint at 352M total params
-    keep_checkpoints: 3            # 7 would accumulate to ~29GB; 3 is ~12.6GB and still
-                                   # leaves a fallback if the newest is mid-write or corrupt.
-                                   # Omit the key to keep every checkpoint.
+    checkpoint_steps: 5000         # 4.2GB per checkpoint
+    keep_checkpoints: 3            # omit to keep every checkpoint
     warm_up_steps: 2000
     validation_steps: 500
     validation_batches: 3          # multiplied by grad_accum_steps (32), so 96 minibatches
     compile_model: true            # cuts peak memory ~10% as well as adding throughput
     num_workers: 8
     prefetch_factor: 4
-    # No cache_clear_steps: empty_cache() is a fragmentation workaround for a card with no
-    # headroom, and it forces a sync and releases blocks the allocator would have reused.
 
   sft:
     effective_batch_token_size: 32768
-    minibatch_token_size: 4096     # the budget caps padded tokens, so this is the same
-                                   # per-step memory as pretrain's 4 rows x 1024, despite
-                                   # batches here running 3-54 ragged rows
-    learning_rate: 7.0e-5          # an order under pretrain. The 1/sqrt(d_model *
-                                   # warm_up_steps) rule used there is a pretrain heuristic
-                                   # and would give 9.9e-3 at this warmup.
+    minibatch_token_size: 4096     # caps padded tokens, so the same memory as pretrain
+    learning_rate: 7.0e-5          # an order under pretrain
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 200                 # 592 minibatches/pass over 18.9k rows, 8 accumulation
-                                   # steps -> 74 optimiser steps per epoch, so ~2.7 epochs.
-                                   # 6.6M tokens, 0.14% of pretrain's budget.
+    num_steps: 200                 # 74 optimiser steps per epoch, so ~2.7 epochs
     label_smoothing: 0.0
     router_aux_loss_coef: 0.01
     device: cuda
     checkpoint_steps: 100          # 4.2GB each; the final step saves regardless
     keep_checkpoints: 2
     warm_up_steps: 10
-    validation_steps: 10           # 20 points on the curve: this is a trial, watch it
+    validation_steps: 10
     validation_batches: 1          # multiplied by grad_accum_steps (8) -> 8 minibatches
-    compile_model: false           # the sampler yields 114 distinct batch widths here
-                                   # against 3 in the toy config, over torch's default
-                                   # recompile limit of 8. Automatic dynamic shapes would
-                                   # probably settle, but a compile pathology looking like
-                                   # "sft does not learn" is the worst failure for a trial.
-                                   # Costs the ~10% peak memory saving noted above.
+    compile_model: false           # 114 distinct batch widths, over torch's recompile limit
     num_workers: 8
     prefetch_factor: 4
-    init_from_step: 10000          # the only trained checkpoint besides 5000, and pretrain
-                                   # is 29% done — these weights are not final
+    init_from_step: 10000          # pretrain is 29% done: these weights are not final
 
   rl:
-    # Untuned. Every value here is a starting point taken from short trials on an earlier
-    # checkpoint, where 60 steps moved nothing on the full prompt set and 15 steps on 16
-    # hand-picked prompts took sampled reward from 30% to 88%. The loop learns when a
-    # prompt's rollouts disagree, and whether they do depends on the SFT model, so watch
-    # mixed_group_rate before reading anything into a flat curve.
+    # Untuned starting points from short trials. The loop learns only when a prompt's
+    # rollouts disagree, so watch mixed_group_rate before reading into a flat curve.
     generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together.
-                                   # Sized for generation, which holds no gradients; the
-                                   # rescore is bounded separately below.
-    effective_prompts_size: 64     # 16 generation minibatches, 512 rollouts generated per update.
-                                   # Only groups whose rollouts disagree are trained on —
-                                   # about a fifth on a model that is mostly right — so the
-                                   # count is sized for what survives, not what is sampled.
+                                   # Affects generation speed and memory only.
+    effective_prompts_size: 64     # prompts per update: 512 rollouts, of which only groups
+                                   # whose rollouts disagree are trained on (about a fifth)
     completions_per_prompt: 8
-    minibatch_token_size: 4096     # padded tokens per rescore-and-backward, the same
-                                   # budget as sft's minibatch_token_size and the same
-                                   # memory per token. A rollout's length is not known
-                                   # until it is generated, so the cap is applied after
-                                   # sampling, by splitting the rows. 32 rows x 204 tokens
+    minibatch_token_size: 4096     # padded tokens per backward pass. 32 rows x 204 tokens
                                    # peaked at 12.0GB in one pass and 8.2GB under this.
     learning_rate: 1.0e-5
-    lr_schedule: constant          # no decay: the policy keeps making new data, so late
-                                   # steps matter as much as early ones
+    lr_schedule: constant          # no decay: the policy keeps making new data
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
     num_steps: 300
-    max_new_tokens: 256            # an easy-tier traced completion runs well under this;
-                                   # a rollout that rambles to the limit pads its whole
-                                   # generation batch out with it
-    temperature: 1.0               # above 1.0 buys more disagreement within a group, the
-                                   # first thing to try if mixed_group_rate is low. The
-                                   # rescore divides by it too, so the update stays the
-                                   # gradient of the policy as sampled.
+    max_new_tokens: 256            # an easy-tier traced completion runs well under this
+    temperature: 1.0               # raise it first if mixed_group_rate is low
     router_aux_loss_coef: 0.01
     device: cuda
     checkpoint_steps: 50           # 4.2GB each; the final step saves regardless
     keep_checkpoints: 2
     warm_up_steps: 10
     validation_steps: 25
-    validation_prompts_size: 32    # prompts per validation batch, set apart from training's
-    validation_batches: 13         # in batches of validation_prompts_size: the whole
-                                   # ~400-prompt test split
-    validation_samples: 2          # rollouts per test prompt for sampled_reward. Fewer
-                                   # per prompt and more prompts: the noise that matters is
-                                   # across functions, not across draws of one
-    compile_model: false           # generation changes sequence length every decode step
-    cache_clear_steps: 1           # generation and the rescore allocate very different
-                                   # shapes back to back, and the card has little headroom
+    validation_prompts_size: 32    # prompts per validation batch
+    validation_batches: 13         # the whole ~400-prompt test split
+    validation_samples: 2          # sampled rollouts per test prompt: the noise that
+                                   # matters is across functions, not draws
+    compile_model: false           # generation changes sequence length every step
+    cache_clear_steps: 1           # generation and the rescore allocate very different shapes
     init_from_step: 200            # sft's final step
 
 data:
   pretrain:
     test_split_ratio: 0.001
-    num_shards: 21         # 35000 steps x 131072 tokens = 4.59B tokens needed. A shard is
-                           # 1.048GB of source, ~269M tokens at ~3.9 bytes/token, so 18
-                           # cover the budget and 21 leaves margin to stay single-epoch.
-                           # ~22GB downloaded instead of ~62GB. Do not derive this from
-                           # num_steps: num_steps is resumable, but data.pretrain is part of
-                           # the stage fingerprint, so a derived value would wipe the run
-                           # every time the step budget moved. Omit to load all 59 shards.
-    # sample_size caps the loaded rows on top of this, which only the toy configs want.
+    num_shards: 21         # 18 cover the 4.59B-token budget; 21 leaves margin. ~22GB of 62GB.
+                           # Hardcoded, not derived from num_steps: data.pretrain is in the
+                           # stage fingerprint, so a derived value would wipe the run.
+                           # Omit to load all 59 shards.
 
   sft:
     num_records: 20000      # -> 18,932 train / 1,068 test rows, 2.38M tokens
-    tier: easy              # straight-line code. If the recipe cannot teach this, a harder
-                            # tier tells you nothing. Medium is viable at max_length 1024
-                            # (<1% of rows overflow, against 75% at the toy config's 256)
-                            # and is the run after this one.
+    tier: easy              # straight-line code; medium is viable at max_length 1024
     tasks: [output]
     inputs_per_fn: 4
     with_trace: true
     test_split_ratio: 0.05
 
   rl:
-    num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed so they
-                            # are not the functions sft trained on. Sized for the test
-                            # split: each function appears under 4 inputs, so 400 prompts
-                            # is ~100 independent functions, and the first run's 93 prompts
-                            # over 24 functions could not tell a 3-point gain from noise.
+    num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed. 400
+                            # prompts is ~100 independent functions.
     tier: easy
     tasks: [output]
     inputs_per_fn: 4
@@ -175,9 +115,7 @@ data:
 tokenizer:
   vocab_size: 32000
   training_size: 50000   # source files used to train BPE, not the training corpus size
-  digit_split: true      # every digit its own token, so arithmetic is
-                         # compositional. Without it BPE merges numbers into
-                         # atomic ids and each fact must be memorised per value.
+  digit_split: true      # every digit its own token, so arithmetic is compositional
 
 locations:
   data_dir: ./data

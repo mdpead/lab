@@ -1,14 +1,7 @@
 """Data loading for both trained stages: the input/target shift, the samplers, the masks.
 
-Built on synthetic rows rather than the real corpus. The script this replaced downloaded a
-StarCoder shard and timed batches per second, which measures the disk and the worker count,
-not this code; what is worth pinning is the shift, the mask, the batch-size arithmetic and
-the fact that a resumed sampler picks up exactly where it left off.
-
-The SFT half pins two things that fail quietly rather than loudly: the prompt/completion
-mask boundary, which is a shift off-by-one, and the fact that output_ids is a copy of the
-shifted ids rather than a view of them. Both produce a plausible-looking loss curve when
-wrong, so neither would show up as a crash during training.
+Built on synthetic rows. The SFT half pins two things that fail quietly: the
+prompt/completion mask boundary, and that output_ids is a copy rather than a view.
 """
 
 import itertools
@@ -41,8 +34,7 @@ class _Blocks(torch.utils.data.Dataset):
     """Stands in for data.TokenizedDataset: one fixed-length int32 block per item."""
 
     def __init__(self, n, pad_id, block=BLOCK):
-        # Distinct, non-pad ids so any mis-shift shows up as a value mismatch. Row r holds
-        # r*block + [0..block), and pad_id is pushed out of that range.
+        # Distinct, non-pad ids, so any mis-shift shows up as a value mismatch
         self.rows = [
             torch.arange(r * block, (r + 1) * block, dtype=torch.int32) + pad_id + 1
             for r in range(n)
@@ -91,8 +83,7 @@ def test_collate_shifts_inputs_and_targets_by_one(tokenizer):
     assert batch["padding_mask"].shape == (3, MAX_LENGTH)
 
     for i in range(3):
-        # Target at position t is the input at position t+1: both are the same block,
-        # offset by one, so comparing the overlap catches an off-by-one in either.
+        # Target at position t is the input at position t+1
         assert torch.equal(batch["output_ids"][i, :-1], batch["input_ids"][i, 1:].long())
 
 
@@ -134,8 +125,7 @@ def test_sampler_is_deterministic_for_a_seed():
 
 
 def test_sampler_visits_every_index_once_per_epoch():
-    """Reshuffled permutations, not sampling with replacement: no block is seen twice
-    before every block has been seen once."""
+    """Reshuffled permutations, not sampling with replacement."""
     drawn = _take(InfiniteRandomSampler(range(NUM_BLOCKS), seed=0), 2 * NUM_BLOCKS)
     assert sorted(drawn[:NUM_BLOCKS]) == list(range(NUM_BLOCKS))
     assert sorted(drawn[NUM_BLOCKS:]) == list(range(NUM_BLOCKS))
@@ -151,8 +141,7 @@ def test_sampler_resumes_mid_epoch(start_index):
 
 @pytest.mark.parametrize("epochs,offset", [(1, 0), (1, 3), (2, 5)])
 def test_sampler_resumes_after_whole_epochs(epochs, offset):
-    """Fast-forwarding past an epoch boundary must consume the RNG, not just skip counts —
-    otherwise a restart mid-run replays the first epoch's order."""
+    """Fast-forwarding past an epoch boundary consumes the RNG, so the order continues."""
     start_index = epochs * NUM_BLOCKS + offset
     full = _take(InfiniteRandomSampler(range(NUM_BLOCKS), seed=0), start_index + 5)
     resumed = _take(InfiniteRandomSampler(range(NUM_BLOCKS), seed=0, start_index=start_index), 5)
@@ -216,8 +205,7 @@ def test_test_loader_covers_the_split_once(splits, tokenizer, config):
     batches = list(dls["test"])
     seen = sum(batch["input_ids"].shape[0] for batch in batches)
 
-    # drop_last defaults to False, so the ragged final batch is kept and validation sees
-    # the whole split rather than a truncated one.
+    # drop_last defaults to False, so validation sees the whole split
     assert seen == len(splits["test"])
     assert len(batches) == -(-len(splits["test"]) // batch_size)
 
@@ -228,9 +216,7 @@ def test_test_loader_covers_the_split_once(splits, tokenizer, config):
 def _sft_row(n, prompt_len, pad_id, tag=0):
     """A prepare_sft row: <bos> + prompt + completion + <eos>, flattened to `n` ids.
 
-    `prompt_len` is where the completion starts, matching prepare_sft. Ids are distinct
-    within and across rows and never equal pad_id, so a mis-shift or a stray mask shows up
-    as a value mismatch rather than passing by coincidence.
+    Ids are distinct and never equal pad_id, so a mis-shift or stray mask shows up.
     """
     return {
         "ids": [tag * 1000 + i + pad_id + 1 for i in range(n)],
@@ -248,12 +234,7 @@ def _rows_of_length(lengths, pad_id=0):
 
 
 def test_sft_collate_masks_the_prompt_and_scores_the_completion(tokenizer):
-    """The shift puts the first completion target at prompt_len - 1.
-
-    Masking prompt_len positions instead would blank that target too, and the model would
-    never be taught to emit the first token of its own answer. Masking one fewer would
-    score the last prompt token, teaching it to generate part of its own input.
-    """
+    """The shift puts the first completion target at prompt_len - 1, and no prompt is scored."""
     pad = tokenizer.pad_token_id
     row = _sft_row(n=7, prompt_len=4, pad_id=pad)
     out = collate_sft_batch([row], pad)["output_ids"][0]
@@ -263,12 +244,7 @@ def test_sft_collate_masks_the_prompt_and_scores_the_completion(tokenizer):
 
 
 def test_sft_collate_leaves_the_prompt_intact_in_the_inputs(tokenizer):
-    """output_ids must be a copy, not a view.
-
-    It overlaps input_ids in the same storage, so masking a view would blank the prompt
-    the model is meant to condition on — it would be asked to produce the completion from
-    nothing, which trains to a bad loss rather than raising.
-    """
+    """output_ids must be a copy, not a view, or masking it would blank the prompt input."""
     pad = tokenizer.pad_token_id
     row = _sft_row(n=7, prompt_len=4, pad_id=pad)
     batch = collate_sft_batch([row], pad)
@@ -346,11 +322,7 @@ def test_token_sampler_covers_every_row_exactly_once_per_pass():
 
 @pytest.mark.parametrize("budget", [64, 200, 1000])
 def test_token_sampler_respects_the_padded_token_budget(budget):
-    """The budget bounds len(batch) * the longest row, not the sum of the rows.
-
-    Padding is what the GPU actually processes, so summing true lengths would let a batch
-    overrun minibatch_token_size at a bucket boundary.
-    """
+    """The budget bounds len(batch) * the longest row, not the sum of the rows."""
     lengths = [7, 31, 12, 45, 3, 28, 19, 22, 9, 50]
     sampler = TokenSampler(_rows_of_length(lengths), budget, seed=0)
 
@@ -360,11 +332,7 @@ def test_token_sampler_respects_the_padded_token_budget(budget):
 
 
 def test_token_sampler_groups_rows_of_similar_length():
-    """Batches are contiguous runs of the length-ordered rows.
-
-    That is the property keeping padding waste low — measured at 0.6% on real SFT data
-    against 28.6% for randomly composed batches.
-    """
+    """Batches are contiguous runs of the length-ordered rows, which keeps padding low."""
     lengths = [17, 3, 9, 40, 12, 3, 25, 8]
     sampler = TokenSampler(_rows_of_length(lengths), token_batch_size=80, seed=0)
 
@@ -373,8 +341,7 @@ def test_token_sampler_groups_rows_of_similar_length():
 
 
 def test_token_sampler_keeps_a_row_larger_than_the_whole_budget():
-    """prepare_sft already dropped what will not fit the context; dropping more here would
-    silently shrink the training set."""
+    """A row over the whole budget is kept, not silently dropped."""
     sampler = TokenSampler(_rows_of_length([5, 500, 5]), token_batch_size=50, seed=0)
 
     assert sorted(i for batch in sampler.batches for i in batch) == [0, 1, 2]
@@ -391,8 +358,7 @@ def test_token_sampler_never_exhausts():
 
 
 def test_token_sampler_reshuffles_order_but_keeps_batch_membership():
-    """Membership is frozen deliberately: re-packing each pass would break the length
-    grouping, which measured roughly three times the padding waste on real SFT data."""
+    """Order is reshuffled each pass but batch membership is fixed, to keep the length grouping."""
     sampler = TokenSampler(_rows_of_length(list(range(5, 45))), token_batch_size=100, seed=0)
     n = len(sampler.batches)
     assert n >= 4, "need several batches for the ordering assertion to mean anything"
@@ -406,12 +372,7 @@ def test_token_sampler_reshuffles_order_but_keeps_batch_membership():
 
 
 def test_token_sampler_reports_no_length():
-    """len() must raise rather than describe a single pass.
-
-    Iteration never ends, so a number here would let `for batch in loader` look finite and
-    hang. Inheriting BatchSampler would supply one that reads attributes this class never
-    sets, turning the TypeError into a confusing AttributeError.
-    """
+    """len() raises rather than describe a single pass of an endless sampler."""
     sampler = TokenSampler(_rows_of_length([10] * 6), token_batch_size=40, seed=0)
     with pytest.raises(TypeError):
         len(sampler)
@@ -462,8 +423,7 @@ def test_sft_test_split_runs_in_process(sft_splits, tokenizer, sft_config):
 
 
 def test_sft_loader_batches_by_token_budget_not_row_count(sft_splits, tokenizer, sft_config):
-    """batch_size must stay None: a batch_sampler owns the grouping, and setting both
-    is the error DataLoader raises on."""
+    """batch_size stays None: the batch_sampler owns the grouping."""
     dls = create_dataloaders_sft(sft_splits, tokenizer, sft_config)
     for dl in dls.values():
         assert dl.batch_size is None
@@ -471,8 +431,7 @@ def test_sft_loader_batches_by_token_budget_not_row_count(sft_splits, tokenizer,
 
 
 def test_sft_loader_reports_no_length(sft_splits, tokenizer, sft_config):
-    """The pretrain test loader is finite and `list(dl)` works on it; the SFT one is not,
-    so it must refuse a length rather than imply the same is safe here."""
+    """The SFT loader is endless, so it refuses a length."""
     dls = create_dataloaders_sft(sft_splits, tokenizer, sft_config)
     for split, dl in dls.items():
         with pytest.raises(TypeError):
@@ -514,8 +473,7 @@ def test_token_sampler_resumes_mid_pass(skip):
 
 
 def test_token_sampler_resumes_after_whole_passes():
-    """Fast-forwarding past a pass boundary must draw from the RNG, not just subtract —
-    otherwise a resumed run replays the first pass's batch order."""
+    """Fast-forwarding past a pass boundary draws from the RNG, so the order continues."""
     rows = _rows_of_length(list(range(5, 25)))
     per_pass = len(TokenSampler(rows, 64, seed=0).batches)
     assert per_pass > 1, "need more than one batch for the boundary to exist"
@@ -528,8 +486,7 @@ def test_token_sampler_resumes_after_whole_passes():
 
 
 def test_resume_converts_minibatches_to_rows_for_pretrain(splits, tokenizer, config):
-    """The pretrain sampler indexes rows; the train loop counts minibatches. batch_size is
-    the bridge, and getting it wrong silently resumes at the wrong point in the corpus."""
+    """The pretrain sampler indexes rows and the loop counts minibatches; batch_size converts."""
     dls = create_dataloaders_pretrain(splits, tokenizer, config)
     batch_size = MINIBATCH_TOKENS // MAX_LENGTH
 
@@ -549,9 +506,7 @@ def test_resume_needs_no_conversion_for_sft(sft_splits, tokenizer, sft_config):
 
 
 def test_resume_finds_the_sampler_that_actually_drives_iteration(sft_splits, tokenizer, sft_config):
-    """DataLoader builds a throwaway .sampler alongside a custom batch_sampler and never
-    reads it. Writing resume state there is discarded silently, which is how this failed
-    before, so the helper must reach the batch_sampler instead."""
+    """Resume state goes on the batch_sampler, not the throwaway .sampler DataLoader builds."""
     dls = create_dataloaders_sft(sft_splits, tokenizer, sft_config)
     assert not isinstance(dls["train"].sampler, TokenSampler)
 
@@ -562,8 +517,7 @@ def test_resume_finds_the_sampler_that_actually_drives_iteration(sft_splits, tok
 
 
 def test_resume_rejects_a_sampler_with_no_resume_state(splits, tokenizer, config):
-    """Pretrain's test split gets a stock SequentialSampler; silently accepting the write
-    is the failure mode this replaces."""
+    """A stock sampler with no resume state is rejected rather than silently accepted."""
     dls = create_dataloaders_pretrain(splits, tokenizer, config)
     with pytest.raises(TypeError, match="start_minibatch"):
         resume_at_minibatch(dls["test"], 5)
@@ -583,8 +537,7 @@ def test_infinite_sampler_refuses_minibatch_resume_without_a_batch_size():
 
 @pytest.fixture
 def rl_rows():
-    """Stands in for prepare_rl's output: prompt text, its token length, and the fields
-    synth's checkers need to score a rollout. Lengths are shuffled relative to index so a
+    """Stands in for prepare_rl's output. Lengths are shuffled relative to index, so a
     sampler that ignored `length` would produce visibly mixed batches."""
     lengths = [40, 12, 33, 7, 25, 19, 48, 3, 30, 15, 44, 9, 21, 37][:NUM_PROMPTS]
     return {
@@ -631,8 +584,7 @@ def test_prompt_sampler_fills_every_batch_but_the_last(rl_rows):
 
 
 def test_prompt_sampler_groups_similar_lengths(rl_rows):
-    """Generation left-pads to the batch's longest prompt, so a batch of mixed lengths is
-    rollout compute spent on padding."""
+    """Batches hold prompts of similar length, so little generation goes on padding."""
     rows = rl_rows["train"]
     sampler = PromptSampler(rows, PROMPTS_PER_STEP, seed=0)
 
@@ -651,8 +603,7 @@ def test_prompt_sampler_covers_every_prompt_once_per_pass(rl_rows):
 
 
 def test_prompt_sampler_resumes_where_it_left_off(rl_rows):
-    """Same contract as TokenSampler: a resumed run continues the shuffle rather than
-    replaying the pass it already did."""
+    """A resumed run continues the shuffle rather than replaying the pass."""
     full = list(itertools.islice(iter(PromptSampler(rl_rows["train"], PROMPTS_PER_STEP, 0)), 6))
     resumed = PromptSampler(rl_rows["train"], PROMPTS_PER_STEP, 0, start_minibatch=2)
     assert list(itertools.islice(iter(resumed), 4)) == full[2:]

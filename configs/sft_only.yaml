@@ -1,13 +1,9 @@
 name: sft_only
 seed: 0
 
-# Full-size model, tokenizer trained on StarCoder, but no pretraining: train.pretrain
-# runs for zero steps, which builds the vocabulary and writes the untrained weights as
-# step 0 for sft to start from. It isolates what pretraining contributes — at the toy
-# scale a 10.8M model reached 26.6% answer accuracy from random init, ahead of a 213M
-# model that had 10k pretrain steps but atomic number tokens, and the three-way
-# comparison could not say whether the tokenizer, the model size or the SFT budget
-# bought that. Here only the pretraining differs from a base run.
+# Full-size model and StarCoder tokenizer, but no pretraining: train.pretrain runs zero
+# steps, which builds the vocabulary and writes the untrained weights as step 0 for sft.
+# Only the pretraining differs from a base run, which isolates what it contributes.
 model:
   d_model: 1024
   num_heads: 16
@@ -23,8 +19,7 @@ model:
 
 train:
   pretrain:
-    # Everything here except num_steps exists because train.train reads it before
-    # deciding there is nothing to do. num_steps 0 is the whole point of this config.
+    # Only num_steps matters here; the rest is read by train.train before it returns
     num_steps: 0
     effective_batch_token_size: 131072
     minibatch_token_size: 4096
@@ -45,16 +40,13 @@ train:
 
   sft:
     effective_batch_token_size: 32768
-    # 2048 rather than the 4096 inherited from base: that value was sized against
-    # pretrain's fixed 4-rows-of-1024 shape and left 408MB of headroom here. Ragged SFT
-    # batches plus a differently-shaped validation set fragment the allocator, and the
-    # first attempt collapsed from 17k to 1.3k tokens/sec at the step-200 validation and
-    # never recovered — a 70-hour projection instead of 5.
+    # 2048 rather than base's 4096: ragged batches fragmented the allocator at 4096 and
+    # throughput collapsed from 17k to 1.3k tokens/sec.
     minibatch_token_size: 2048
-    learning_rate: 3.0e-4      # from scratch, not a gentle fine-tune off good weights
+    learning_rate: 3.0e-4      # from scratch, not a fine-tune
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 10000           # ~328M tokens; ~5h at the 17.9k tok/s this model showed
+    num_steps: 10000           # ~328M tokens; ~5h at 17.9k tok/s
     label_smoothing: 0.0
     router_aux_loss_coef: 0.01
     device: cuda
@@ -69,18 +61,13 @@ train:
     init_from_step: 0          # the untrained checkpoint the zero-step pretrain wrote
 
   rl:
-    # Untuned, as in base. This is the first checkpoint in the current answer format with
-    # enough sft behind it to answer at all, so it is where the rl loop gets tried on the
-    # real path before a full base run is paid for.
+    # Untuned, as in base
     generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together
-    effective_prompts_size: 64     # 16 generation minibatches, 512 rollouts generated per update.
-                                   # Only groups whose rollouts disagree are trained on —
-                                   # about a fifth on a model that is mostly right — so the
-                                   # count is sized for what survives, not what is sampled.
+    effective_prompts_size: 64     # prompts per update: 512 rollouts, of which only groups
+                                   # whose rollouts disagree are trained on (about a fifth)
     completions_per_prompt: 8
-    minibatch_token_size: 2048     # padded tokens per rescore-and-backward. Half of
-                                   # base's, for the reason sft's minibatch is: this
-                                   # config has already shown it has no headroom at 4096.
+    minibatch_token_size: 2048     # padded tokens per backward pass; half of base's, as
+                                   # for sft above
     learning_rate: 1.0e-5
     lr_schedule: constant
     adam_betas: [0.9, 0.95]
@@ -94,12 +81,9 @@ train:
     keep_checkpoints: 1
     warm_up_steps: 5
     validation_steps: 25
-    validation_prompts_size: 32    # prompts per validation batch, set apart from training's
-    validation_batches: 13         # in batches of validation_prompts_size: the whole
-                                   # ~400-prompt test split
-    validation_samples: 2          # rollouts per test prompt for sampled_reward. Fewer
-                                   # per prompt and more prompts: the noise that matters is
-                                   # across functions, not across draws of one
+    validation_prompts_size: 32    # prompts per validation batch
+    validation_batches: 13         # the whole ~400-prompt test split
+    validation_samples: 2          # sampled rollouts per test prompt
     compile_model: false
     cache_clear_steps: 1
     init_from_step: 10000          # sft's final step
@@ -107,9 +91,7 @@ train:
 data:
   pretrain:
     test_split_ratio: 0.001
-    # Only the tokenizer consumes this corpus, and it reads tokenizer.training_size files
-    # from the train split. sample_size caps what prepare_pretrain then tokenises, which
-    # would otherwise chunk the whole corpus for a stage that runs zero steps.
+    # Only the tokenizer consumes this corpus. sample_size caps what is then tokenised.
     num_shards: 1
     sample_size: 60000
 
@@ -122,11 +104,7 @@ data:
     test_split_ratio: 0.02
 
   rl:
-    num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed so they
-                            # are not the functions sft trained on. Sized for the test
-                            # split: each function appears under 4 inputs, so 400 prompts
-                            # is ~100 independent functions, and the first run's 93 prompts
-                            # over 24 functions could not tell a 3-point gain from noise.
+    num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed
     tier: easy
     tasks: [output]
     inputs_per_fn: 4

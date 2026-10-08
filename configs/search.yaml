@@ -1,22 +1,18 @@
 name: search
 seed: 0
 
-# Input prediction as a search: guess arguments, trace them, compare the result with the
-# target, and try again. The `input` config asks the same question but traces forwards
-# from arguments the model must already have chosen, so working them out has to happen in
-# one pass before anything is written, and rl there has no reasoning to select between.
-# Here sft teaches the shape of an attempt and that the search ends on the one that
-# reaches the target; choosing the next guess after a miss has no single right answer in
-# the data, and that is what rl is left to learn.
+# Input prediction as a search: guess arguments, trace them, compare with the target, and
+# try again. sft teaches the shape of an attempt and when the search ends; choosing the
+# next guess after a miss is what rl is left to learn.
 #
-# Starts from the sft_only model, as `input` does and for the same reason. Seed the run
-# directory by hand before the first run:
+# Starts from the sft_only model, as `input` does. Seed the run directory by hand before
+# the first run:
 #
 #   mkdir -p models/search/pretrain/checkpoints
 #   ln -s "$(realpath models/sft_only/sft/checkpoints/10000.pt)" models/search/pretrain/checkpoints/10000.pt
 #   cp -r models/sft_only/tokenizer models/search/tokenizer
 #
-# The model and tokenizer sections must stay identical to sft_only's for those weights to
+# The model and tokenizer sections must stay identical to sft_only's for the weights to
 # load. The rl values are untuned and this config has not been run.
 model:
   d_model: 1024
@@ -35,8 +31,7 @@ train:
   sft:
     effective_batch_token_size: 32768
     minibatch_token_size: 2048     # as sft_only: no headroom at 4096 on ragged batches
-    learning_rate: 1.0e-4          # a third of sft_only's: a fine-tune off weights that
-                                   # already trace, not a start from random
+    learning_rate: 1.0e-4          # a third of sft_only's: a fine-tune, not from random
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
     num_steps: 1000                # ~33M tokens, about one pass over data.sft
@@ -51,35 +46,23 @@ train:
     compile_model: false
     num_workers: 8
     prefetch_factor: 4
-    init_from_step: 10000          # sft_only's final sft step, linked in as described above
+    init_from_step: 10000          # sft_only's final sft step, linked in as above
 
   rl:
     generation_prompts_size: 8     # x completions_per_prompt = 128 rows generated together.
-                                   # Generation is one forward pass per token and costs
-                                   # about the same for 128 rows as for 32, and a
-                                   # minibatch decodes until its longest rollout stops,
-                                   # so the time goes with the number of minibatches. At
-                                   # 2 a step took 7.5 minutes with the GPU mostly idle.
-                                   # The backward is chunked by minibatch_token_size and
-                                   # does not grow with this
-    effective_prompts_size: 32     # 4 generation minibatches, 512 rollouts generated per
-                                   # update, the same count as `input`
-    completions_per_prompt: 16     # twice `input`'s. A search that lands is rare at first,
-                                   # and a group only teaches if some rollout in it did
-                                   # better than the rest
-    minibatch_token_size: 2048     # padded tokens per rescore-and-backward
-    advantage_sd_floor: 0.1        # the reward is graded (synth.reward_search_answer), so
-                                   # groups can differ by one attempt's cost of 0.02. Under
-                                   # this spread the advantage scales down rather than
-                                   # being normalised up to full size. A group split
-                                   # between right and wrong sits well above it
+                                   # Generation time goes with the number of minibatches:
+                                   # at 2 a step took 7.5 minutes with the GPU mostly idle.
+    effective_prompts_size: 32     # prompts per update: 512 rollouts, as in `input`
+    completions_per_prompt: 16     # twice `input`'s: a search that lands is rare at first
+    minibatch_token_size: 2048     # padded tokens per backward pass
+    advantage_sd_floor: 0.1        # groups can differ by one attempt's cost of 0.02; below
+                                   # this spread the advantage scales down
     learning_rate: 1.0e-5
     lr_schedule: constant
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
     num_steps: 300                 # 9,600 prompts, about 2.7 passes over the train split
-    max_new_tokens: 512            # an attempt is ~80 tokens and 136 at most, so three
-                                   # always fit and six usually do
+    max_new_tokens: 512            # an attempt is ~80 tokens, 136 at most
     temperature: 1.0
     router_aux_loss_coef: 0.01
     device: cuda
@@ -100,13 +83,11 @@ data:
     tier: easy
     tasks: [search]
     inputs_per_fn: 4
-    with_trace: true        # zero to two missed attempts, then the one that reaches the
-                            # target; see synth.format_search_task
+    with_trace: true        # zero to two missed attempts, then the one that hits
     test_split_ratio: 0.02
 
   rl:
-    num_records: 4000       # ~3,600 train / ~400 test prompts, from their own seed.
-                            # Half of `input`'s train split, so 300 steps revisit it
+    num_records: 4000       # ~3,600 train / ~400 test prompts, from their own seed
     tier: easy
     tasks: [search]
     inputs_per_fn: 4

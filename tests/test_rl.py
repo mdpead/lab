@@ -1,10 +1,7 @@
 """The RL loop moves the policy toward rewarded rollouts.
 
-The real reward needs a model that can already answer, so these swap in a reward a random
-model hits about half the time: whether its one generated token starts with a space. That
-gives every group a mix of 0s and 1s, and the probability mass the model puts on such
-tokens is exact to measure, so the test asserts the direction the update moved it rather
-than reading anything into sampled text.
+The real reward needs a model that can already answer, so these swap in one a random model
+hits about half the time: whether its one generated token starts with a space.
 """
 
 import pytest
@@ -70,8 +67,7 @@ def _run(
         "validation_steps": 1000,
         "validation_batches": 1,
         "router_aux_loss_coef": 0.01,
-        # One token by default, so the reward is a function of exactly the position
-        # _mass_on reads
+        # One token by default, the position _mass_on reads
         "max_new_tokens": max_new_tokens,
         "temperature": temperature,
         **overrides,
@@ -114,11 +110,7 @@ def fresh_model(make_model, tokenizer):
 
 @pytest.mark.parametrize("sign", [1, -1], ids=["rewarded", "penalised"])
 def test_update_moves_mass_toward_reward(fresh_model, tokenizer, tmp_path, monkeypatch, sign):
-    """Rewarding space-led tokens raises their probability; rewarding the rest lowers it.
-
-    Both directions, because a loss with the wrong sign passes a one-sided test whenever
-    something else happens to push the mass the same way.
-    """
+    """Rewarding space-led tokens raises their probability; rewarding the rest lowers it."""
     ids = _rewarded_ids(tokenizer)
     before = _mass_on(fresh_model, tokenizer, ids)
     assert 0.1 < before < 0.9, "the fake reward needs mixed groups to produce a gradient"
@@ -137,11 +129,7 @@ def test_update_moves_mass_toward_reward(fresh_model, tokenizer, tmp_path, monke
 def test_uniform_groups_are_dropped_and_leave_the_weights_alone(
     fresh_model, tokenizer, tmp_path, monkeypatch
 ):
-    """With every group agreeing there is nothing to train on, so nothing is rescored.
-
-    The step still counts, since the sampler has moved on, but the optimiser is not
-    applied: with no policy gradient the only thing it could apply is weight decay.
-    """
+    """With every group agreeing nothing is rescored; the step counts but nothing is applied."""
     before = [p.detach().clone() for p in fresh_model.parameters()]
     results = _run(fresh_model, tokenizer, tmp_path, monkeypatch, lambda row, c: True, num_steps=2)
     train_results = _train(results)
@@ -170,11 +158,7 @@ def test_only_mixed_groups_are_trained_on(fresh_model, tokenizer, tmp_path, monk
 def test_a_graded_reward_trains_while_the_checker_still_reports_success(
     fresh_model, tokenizer, tmp_path, monkeypatch
 ):
-    """A task's graded reward is what the gradient follows; its checker is what is reported.
-
-    Here nothing ever passes the checker, so a loop that trained on the score would find
-    every group uniform and train on none.
-    """
+    """The gradient follows a task's graded reward; its checker is what is reported."""
     results = _run(
         fresh_model, tokenizer, tmp_path, monkeypatch, lambda row, c: False, num_steps=2,
         reward=lambda row, c: 0.5 * _space_led(row, c),
@@ -192,10 +176,8 @@ def test_advantage_sd_floor_shrinks_the_update_from_a_narrow_group(
 ):
     """Without a floor a group split by 0.01 is normalised up to a full-size advantage.
 
-    The same rollouts under the same seed, so the two gradients differ only by the floor:
-    the spread of a 0-or-0.01 reward is at most about 0.005, a hundredth of a floor of 0.5.
-    The bound asserted is looser than that because the router's aux gradient rides along
-    with the policy gradient and does not scale with the advantage.
+    Same rollouts and seed, so the gradients differ only by the floor. The bound is loose
+    because the router's aux gradient does not scale with the advantage.
     """
     narrow = lambda row, c: 0.01 * _space_led(row, c)
     state = {k: v.clone() for k, v in fresh_model.state_dict().items()}
@@ -221,11 +203,7 @@ def test_a_fresh_run_records_its_starting_point(fresh_model, tokenizer, tmp_path
 
 
 def test_rescore_matches_sampling_logprobs(fresh_model, tokenizer, tmp_path, monkeypatch):
-    """The gradient pass scores the same tokens the sampler drew, to within precision.
-
-    A gap here means the shift, the left-padding offsets or the masking disagree between
-    generate and the loss, and the update would be pushing on tokens nobody sampled.
-    """
+    """The gradient pass scores the same tokens the sampler drew, to within precision."""
     results = _train(_run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1))
     assert results[0]["trained_groups"] > 0, "nothing was rescored, so the gap is vacuous"
     assert results[0]["logprob_gap"] < 1e-3
@@ -234,11 +212,7 @@ def test_rescore_matches_sampling_logprobs(fresh_model, tokenizer, tmp_path, mon
 def test_rescore_matches_sampling_logprobs_at_other_temperatures(
     fresh_model, tokenizer, tmp_path, monkeypatch
 ):
-    """The gradient pass scores the tempered distribution the sampler drew from.
-
-    Away from 1.0 the tempered and untempered logprobs differ on every token, so a rescore
-    that ignores the temperature shows up here as a gap far above precision.
-    """
+    """The gradient pass scores the tempered distribution the sampler drew from."""
     results = _train(
         _run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1, temperature=2.0)
     )
@@ -247,12 +221,7 @@ def test_rescore_matches_sampling_logprobs_at_other_temperatures(
 
 
 def test_sampled_validation_is_reproducible_and_leaves_training_rng(fresh_model, tokenizer, monkeypatch):
-    """Same weights, same score — and training's own random stream is not advanced.
-
-    A sampled score that differed between two calls on unchanged weights would make a
-    step-to-step change unreadable; one that consumed the global RNG would make a run's
-    rollouts depend on how often it validated.
-    """
+    """Same weights, same score, and training's own random stream is not advanced."""
     monkeypatch.setitem(rl._TASK_CHECKERS, "fake", lambda row, c: _continuation(row, c).startswith(" "))
     rows = [
         {"prompt": p, "task": "fake", "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"])}
@@ -276,12 +245,8 @@ def test_sampled_validation_is_reproducible_and_leaves_training_rng(fresh_model,
 
 
 def test_rescore_lines_up_over_multi_token_rollouts(fresh_model, tokenizer, tmp_path, monkeypatch):
-    """Each rescored token is matched to the token the sampler drew, across a whole rollout.
-
-    The rescore projects only completion positions and flattens them, so its logprobs reach
-    the loss by index. Prompts of different lengths put the completions at different
-    offsets within a row, and a shift or a row mix-up here scores tokens nobody sampled.
-    """
+    """Each rescored token is matched to the one the sampler drew, across prompts of
+    different lengths."""
     results = _train(
         _run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1, max_new_tokens=12)
     )
@@ -344,10 +309,9 @@ def test_chunked_rescore_gives_the_single_pass_gradient(fresh_model, tokenizer):
 
 
 def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, tokenizer):
-    """A step's rollouts are rescored together, whatever minibatches they were generated in.
+    """A step's rollouts are rescored together, whatever minibatches generated them.
 
-    The two minibatches decode to different widths, so pooling has to pad one of them, and
-    a row that came out shifted or scored against the wrong advantage would move the sum.
+    The two minibatches decode to different widths, so pooling has to pad one.
     """
     from src import generation
 

@@ -1,9 +1,7 @@
 """Throughput of the Triton kernel against torch's fused SDPA and unfused eager attention.
 
-Opt-in (`pytest tests/test_flash_attention_perf.py --benchmark -s`): timings depend on the
-GPU and on what else is running, so this reports rather than gates. The one assertion is a
-loose floor — it catches a kernel that has stopped being a flash attention (materialising
-the full score matrix, losing its autotuned config) rather than a few percent of drift.
+Opt-in (`pytest tests/test_flash_attention_perf.py --benchmark -s`). It reports rather
+than gates: the one assertion is a loose floor.
 """
 
 import pytest
@@ -16,8 +14,7 @@ DEV = "cuda"
 BATCHES, HEADS, HEAD_DIMS = 4, 4, 64
 SEQS = [128, 256, 512, 1024]
 
-# The eager path materialises seq x seq scores, so it is the loser by construction; SDPA is
-# the real bar. Allow the kernel to be this many times slower than SDPA before failing.
+# How many times slower than SDPA the kernel may be before failing
 MAX_SLOWDOWN_VS_SDPA = 3.0
 
 
@@ -62,8 +59,7 @@ def test_forward_throughput(causal):
         ms_sdpa = _bench_ms(lambda: _sdpa(q, k, v, causal))
         ms_eager = _bench_ms(lambda: _eager(q, k, v, causal))
 
-        # QK^T and probs @ V each cost 2*B*H*seq^2*d flops; causal masking roughly halves
-        # the useful work (ignoring the diagonal).
+        # QK^T and probs @ V each cost 2*B*H*seq^2*d flops
         flops = 4 * BATCHES * HEADS * seq * seq * HEAD_DIMS
         if causal:
             flops //= 2

@@ -2,9 +2,8 @@ from src import data, model, tokenizer, utils, rl, train, dataloader
 import logging
 
 
-# Reinforcement learning on synth tasks with verifiable rewards: sample rollouts from a
-# prompt, score them by executing the generated function, update on the group-relative
-# advantage (GRPO). See src/rl.py for the loop.
+# Reinforcement learning on synth tasks: sample rollouts, score them by executing the
+# generated function, update on the group-relative advantage (GRPO). See src/rl.py.
 def main():
 
     logging.basicConfig(level=logging.INFO)
@@ -31,7 +30,7 @@ def main():
         token,
         config,
         # From SFT, not pretrain: a pretrained model never emits the answer marker, so
-        # every reward is 0, every advantage is 0, and there is no gradient to follow.
+        # every reward would be 0
         init_from=utils.get_stage_path(config, "sft"),
     )
 

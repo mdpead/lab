@@ -8,13 +8,9 @@ from src import data, utils
 def create_tokenizer(ds, tokenizer_config):
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
 
-    # digit_split puts every digit in its own pre-token, so BPE can never merge a number
-    # into one atomic id. Without it, 99% of the integers appearing in synth traces are a
-    # single token bearing no relation to their digits, and the model has to memorise each
-    # arithmetic fact per value rather than learn the operation. Read from the config
-    # rather than hardcoded because config["tokenizer"] is what the stage fingerprint
-    # compares: a change made only here would leave the saved tokenizer in place and the
-    # pretrained checkpoints valid, silently keeping the old scheme.
+    # digit_split gives every digit its own token, so the model can learn arithmetic on
+    # digits rather than memorise each number as an unrelated id. Read from the config so
+    # that changing it invalidates the saved tokenizer and checkpoints.
     byte_level = pre_tokenizers.ByteLevel(add_prefix_space=False)
     if tokenizer_config.get("digit_split"):
         tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
@@ -24,15 +20,9 @@ def create_tokenizer(ds, tokenizer_config):
         tokenizer.pre_tokenizer = byte_level
     tokenizer.decoder = decoders.ByteLevel()
 
-    # Reasoning and answer delimiters, pipe-guarded so they cannot collide with the angle
-    # brackets that occur naturally in Python reprs ("<class 'int'>"). One token each
-    # rather than the four that "# Trace:\n" costs, and unlike a "#" comment they cannot
-    # appear in generated source, so extract_answer's split is unambiguous. Reserved here
-    # rather than added later because a post-hoc add_tokens would grow the vocabulary past
-    # vocab_size and so the embedding matrix past the model's.
-    #
-    # The spare slots exist so the next format idea does not cost another pretraining run:
-    # the vocabulary is fixed at training time, and adding a token later means retraining.
+    # Reasoning and answer delimiters, pipe-guarded so they cannot collide with Python
+    # reprs like "<class 'int'>". Reserved now, with spare slots, because the vocabulary
+    # is fixed once pretraining starts.
     special_tokens = [
         "<bos>", "<eos>", "<pad>", "<unk>",
         "<|think|>", "<|/think|>",

@@ -77,11 +77,7 @@ def test_gradients_flow_without_nan(make_model, tokenizer, num_heads, num_kv_hea
 
 
 def _reference_moe(moe, x):
-    """The obvious implementation: for each expert, mask out its tokens and run them.
-
-    Deliberately naive and slow -- it is the oracle the capacity dispatch has to match, and
-    it is the code that dispatch replaced. Only valid where nothing is dropped.
-    """
+    """The naive oracle the capacity dispatch has to match. Only valid where nothing is dropped."""
     import torch.nn.functional as F
 
     router_logits = moe.router(x)
@@ -138,8 +134,7 @@ class _FixedRouter(torch.nn.Module):
     def forward(self, x):
         n, e = x.shape[0], self.num_experts
         logits = torch.full((n, e), -10.0, device=x.device, dtype=x.dtype)
-        # Collapsed: every token picks the same two experts. Balanced: the pair each token
-        # picks cycles, so all e experts carry an equal share.
+        # Collapsed: every token picks the same two experts. Balanced: the pair cycles.
         first = torch.zeros(n, dtype=torch.long, device=x.device) if self.collapsed \
             else torch.arange(n, device=x.device) % e
         rows = torch.arange(n, device=x.device)
@@ -149,11 +144,7 @@ class _FixedRouter(torch.nn.Module):
 
 
 def test_moe_aux_loss_tracks_imbalance(make_model, tokenizer):
-    """Guards the reduction axes: a collapsed router must score worse than a balanced one.
-
-    Reducing over the wrong axes yields a constant, which silently disables load balancing
-    for a whole training run rather than failing.
-    """
+    """A collapsed router scores worse than a balanced one, which guards the reduction axes."""
     moe = make_model(len(tokenizer)).decoder.decoder_layers[0].feedforward
     x = torch.randn(4, 32, 64, device=DEV, dtype=torch.float16)
 
@@ -162,8 +153,7 @@ def test_moe_aux_loss_tracks_imbalance(make_model, tokenizer):
     moe.router = _FixedRouter(moe.num_experts, collapsed=True)
     collapsed = moe(x)[1].item()
 
-    # Perfect balance scores 1.0; piling top_k experts' worth of load onto top_k experts
-    # scores num_experts / top_k.
+    # Perfect balance scores 1.0; full collapse scores num_experts / top_k
     assert balanced == pytest.approx(1.0, abs=0.05), f"balanced routing scored {balanced:.4f}"
     assert collapsed == pytest.approx(moe.num_experts / moe.top_k, abs=0.05), \
         f"collapsed routing scored {collapsed:.4f}"
@@ -171,12 +161,7 @@ def test_moe_aux_loss_tracks_imbalance(make_model, tokenizer):
 
 
 def test_padding_content_cannot_reach_real_tokens(make_model, tokenizer):
-    """With the mask, what sits in the pad slots is irrelevant to the real tokens.
-
-    Batch shape is held fixed so capacity is identical in both calls; only the padding
-    content differs. Checks every position — mid-sequence is where the effect appears,
-    and the final position alone can pass by luck.
-    """
+    """With the mask, what sits in the pad slots cannot affect the real tokens, at any position."""
     moe = make_model(len(tokenizer), capacity_factor=1.0).train().decoder.decoder_layers[0].feedforward
     real = torch.randn(1, 24, 64, device=DEV, dtype=torch.float16)
     mask = torch.zeros(1, 64, dtype=torch.bool, device=DEV)
@@ -191,12 +176,7 @@ def test_padding_content_cannot_reach_real_tokens(make_model, tokenizer):
 
 
 def test_padding_is_invisible_when_capacity_cannot_bind(make_model, tokenizer):
-    """At a capacity no real token can overflow, padding changes nothing at all.
-
-    Capacity is derived from the padded n so that it stays a host-side constant, which
-    means padding still buys real tokens extra headroom. Remove that degree of freedom and
-    the masked path must reproduce the unpadded one exactly.
-    """
+    """At a capacity no real token can overflow, padding changes nothing at all."""
     moe = make_model(len(tokenizer), capacity_factor=4.0).decoder.decoder_layers[0].feedforward
     real = torch.randn(1, 24, 64, device=DEV, dtype=torch.float16)
     padded = torch.cat([real, torch.randn(1, 40, 64, device=DEV, dtype=torch.float16)], dim=1)
@@ -225,11 +205,7 @@ def test_unmasked_padding_does_perturb_real_tokens(make_model, tokenizer):
 
 
 def test_inference_never_drops_a_token(make_model, tokenizer):
-    """A single-token decode step keeps its experts, at a capacity that would drop it.
-
-    The formula gives int(1.0 * 1 * 2 / 4) = 0 seats for one token, so enforcing capacity
-    at inference turns every cached decode step at batch 1 into a residual-only pass.
-    """
+    """A single-token decode step keeps its experts, at a capacity that would give it no seats."""
     m = make_model(len(tokenizer), capacity_factor=1.0)
     moe = m.decoder.decoder_layers[0].feedforward
     x = torch.randn(1, 1, 64, device=DEV, dtype=torch.float16)

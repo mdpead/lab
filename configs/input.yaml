@@ -1,23 +1,17 @@
 name: input
 seed: 0
 
-# Input prediction: given a function and a result, find arguments that produce it. The
-# task where rl has something to offer that sft does not. Many argument sets are usually
-# correct — a variable overwritten on the first line can take any value — but sft is shown
-# one arbitrary choice per example and penalised for every other, while the rl reward
-# accepts whatever the function confirms.
+# Input prediction: given a function and a result, find arguments that produce it. Many
+# argument sets are usually correct; sft is shown one, while the rl reward accepts any
+# the function confirms.
 #
-# Starts from the sft_only model, which already traces execution forwards, rather than
-# from scratch: this run is about the last stage, and five hours of sft to relearn tracing
-# would tell it nothing. There is no pretrain stage here to produce those weights, so the
-# run directory is seeded by hand before the first run:
+# Starts from the sft_only model. Seed the run directory by hand before the first run:
 #
 #   mkdir -p models/input/pretrain/checkpoints
 #   ln -s "$(realpath models/sft_only/sft/checkpoints/10000.pt)" models/input/pretrain/checkpoints/10000.pt
 #   cp -r models/sft_only/tokenizer models/input/tokenizer
 #
-# sft then initialises from models/input/pretrain the way every config's sft does. The
-# model and tokenizer sections must stay identical to sft_only's for those weights to load.
+# The model and tokenizer sections must stay identical to sft_only's for the weights to load.
 model:
   d_model: 1024
   num_heads: 16
@@ -35,8 +29,7 @@ train:
   sft:
     effective_batch_token_size: 32768
     minibatch_token_size: 2048     # as sft_only: no headroom at 4096 on ragged batches
-    learning_rate: 1.0e-4          # a third of sft_only's: a fine-tune off weights that
-                                   # already trace, not a start from random
+    learning_rate: 1.0e-4          # a third of sft_only's: a fine-tune, not from random
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
     num_steps: 1000                # ~33M tokens, about one pass over data.sft
@@ -51,16 +44,14 @@ train:
     compile_model: false
     num_workers: 8
     prefetch_factor: 4
-    init_from_step: 10000          # sft_only's final sft step, linked in as described above
+    init_from_step: 10000          # sft_only's final sft step, linked in as above
 
   rl:
     # Untuned; the same values as sft_only's rl stage, so the two runs differ in the task
     generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together
-    effective_prompts_size: 64     # 16 generation minibatches, 512 rollouts generated per
-                                   # update; only groups whose rollouts disagree are
-                                   # trained on
+    effective_prompts_size: 64     # prompts per update: 512 rollouts
     completions_per_prompt: 8
-    minibatch_token_size: 2048     # padded tokens per rescore-and-backward
+    minibatch_token_size: 2048     # padded tokens per backward pass
     learning_rate: 1.0e-5
     lr_schedule: constant
     adam_betas: [0.9, 0.95]
@@ -87,8 +78,7 @@ data:
     tier: easy
     tasks: [input]
     inputs_per_fn: 4
-    with_trace: true        # the trace runs forwards from the arguments the answer then
-                            # states, so the model commits to a guess and checks it
+    with_trace: true        # the trace runs forwards from the arguments the answer states
     test_split_ratio: 0.02
 
   rl:

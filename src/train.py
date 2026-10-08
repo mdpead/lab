@@ -39,9 +39,7 @@ class WarmupInverseSquareRootLR(LRScheduler):
 class WarmupConstantLR(LRScheduler):
     """Linear warmup to the base rate, then held there.
 
-    For RL, where decay works against the stage: the policy keeps generating new data, so
-    late steps are no less informative than early ones, and a rate that shrinks as
-    1/sqrt(step) leaves a long run learning almost nothing by its end.
+    For RL, where the policy keeps generating new data and late steps matter as much.
     """
 
     def __init__(
@@ -134,14 +132,11 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     step_no = run["step_no"]
     run_path = run["run_path"]
 
-    # Initialise values - need to do learning rate, optimiser state, scaler state loading here too
     batch_tokens = 0
     start_time = time.time()
     total_loss_ce = 0.0
     total_loss_aux = 0.0
-    # Resume exactly where we left off: skip the sampler forward in index space
-    # (no batches are read from disk for skipped positions). Counted in minibatches, the
-    # unit both stages share — pretrain's sampler converts to rows, SFT's already batches.
+    # Resume where we left off by skipping the sampler forward, counted in minibatches
     resume_at_minibatch(dataloaders["train"], step_no * grad_accum_steps)
     optimiser.zero_grad(set_to_none=True)
 
@@ -156,9 +151,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
 
         with amp.autocast(device_type=device.type):
 
-            # Forward pass
-            # The mask keeps pad tokens out of the MoE's seat assignment: they are not
-            # data, and letting them take seats would drop real tokens instead.
+            # The mask keeps pad tokens out of the MoE's seat assignment
             logits, loss_aux = model(
                 batch["input_ids"], padding_mask=batch["padding_mask"]
             )
@@ -167,7 +160,6 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
             )
             loss = loss_ce + loss_aux * router_aux_loss_coef
 
-        # Compute loss and gradients
         minibatch_tokens = batch["input_ids"].ne(tokenizer.pad_token_id).sum().item()
         batch_tokens += minibatch_tokens
 
@@ -188,10 +180,8 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         lr_scheduler.step()
         optimiser.zero_grad(set_to_none=True)
 
-        # Increment step counter FIRST
         step_no += 1
 
-        # Logging with the completed step number
         elapsed_time = time.time() - start_time
         result = {}
         result["type"] = "train"
@@ -243,10 +233,8 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         if step_no >= num_steps:
             break
 
-    # A final save when num_steps is not a multiple of checkpoint_steps. Without it every
-    # step since the last checkpoint is discarded — the weights, and the metrics too, since
-    # save_checkpoint is also what writes results.json. Guarded so a run that ends exactly
-    # on a checkpoint boundary does not write the same step twice.
+    # A final save when num_steps is not a multiple of checkpoint_steps, so the steps since
+    # the last checkpoint (and their results.json records) are not lost.
     if step_no % checkpoint_steps != 0:
         save_checkpoint(
             model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
@@ -268,11 +256,9 @@ def checkpoint_steps_on_disk(checkpoints_path):
 
 
 def _prune_checkpoints(checkpoints_path, keep):
-    """Delete all but the `keep` most recent checkpoints.
+    """Delete all but the `keep` most recent checkpoints, ordered by step number.
 
-    Called after the new checkpoint is written, never before, so an interrupted prune leaves
-    more checkpoints than asked for rather than none. Ordering is by step number rather than
-    mtime, so a resumed run that rewrites an existing step does not reorder history.
+    Called after the new checkpoint is written, so an interrupted prune leaves too many.
     """
     if keep is None:
         return
@@ -313,7 +299,6 @@ def save_checkpoint(
 
 def load_checkpoint(run_path, step_no, device=None):
     checkpoints_path = f"{run_path}/checkpoints"
-    # Load checkpoint with device mapping if device is specified
     if device is not None:
         checkpoint = torch.load(f"{checkpoints_path}/{step_no}.pt", map_location=device)
     else:
@@ -326,10 +311,7 @@ def load_checkpoint(run_path, step_no, device=None):
 def create_training_objects(model, train_config, tokenizer):
 
     device = torch.device(train_config["device"])
-    # Defaulted rather than required: RL builds these objects too and never uses the
-    # criterion, so demanding the key would mean writing a value into its config that
-    # describes nothing the stage does. 0.0 is CrossEntropyLoss's own default, so a stage
-    # that omits it gets no smoothing rather than something chosen here.
+    # label_smoothing is defaulted because RL builds these objects and never uses the criterion
     criterion = nn.CrossEntropyLoss(
         reduction="mean",
         label_smoothing=train_config.get("label_smoothing", 0.0),
@@ -344,7 +326,7 @@ def create_training_objects(model, train_config, tokenizer):
         weight_decay=0.01,
     )
 
-    # Defaulted, so the stages that predate the key keep the schedule they were trained with
+    # Defaulted, so stages that predate the key keep their schedule
     schedule = _LR_SCHEDULES[train_config.get("lr_schedule", "inverse_sqrt")]
     lr_scheduler = schedule(optimiser, train_config["warm_up_steps"])
 
@@ -410,16 +392,10 @@ def load_run(run_path, model, train_config, tokenizer):
 
 
 def load_model_weights(model, from_path, device, step=None):
-    """Start a stage from another stage's weights: parameters only, nothing else.
+    """Start a stage from another stage's weights: parameters only.
 
-    Not a resume. The optimiser moments are estimates fitted to the previous stage's loss
-    surface, the scheduler position would hand SFT a decayed learning rate with no warmup,
-    and the step counter would report the run already finished. Only the parameters carry
-    over; everything else is built fresh for the new objective.
-
-    `step` pins which checkpoint to take. Leaving it None takes the latest, which is
-    convenient but means the stage config no longer records what actually loaded — prefer
-    pinning it so the saved config is an honest account of the run's ancestry.
+    Not a resume: optimiser, scheduler and step counter are built fresh. `step` pins which
+    checkpoint to take; None takes the latest, which leaves the ancestry unrecorded.
     """
     steps = checkpoint_steps_on_disk(f"{from_path}/checkpoints")
     if not steps:
@@ -446,8 +422,7 @@ def load_model_weights(model, from_path, device, step=None):
 
 def get_run(run_path, model, train_config, tokenizer, init_from=None):
     if checkpoint_steps_on_disk(f"{run_path}/checkpoints"):
-        # This stage has its own history, so it resumes from that and ignores init_from
-        # entirely — the earlier stage only ever seeds the very first run.
+        # A stage with its own history resumes from it and ignores init_from
         run = load_run(run_path, model, train_config, tokenizer)
     else:
         if init_from is not None:
@@ -464,24 +439,18 @@ def get_run(run_path, model, train_config, tokenizer, init_from=None):
 
 
 def train(stage, model, dataloaders, tokenizer, config, init_from=None, loop=None):
-    """`init_from` is another stage's directory, whose weights seed this one's first run.
+    """Run a stage. `init_from` is another stage's directory, whose weights seed the first run.
 
-    `loop` is the per-stage training loop, defaulting to this module's. Everything above
-    the call to it — resume versus init_from, the zero-step checkpoint, the already-complete
-    check, compilation — is the same whatever is being trained, and the ordering between
-    those branches is load-bearing. A stage whose loop differs passes it in rather than
-    copying the block, so a fix to it cannot land in one copy and not the other.
+    `loop` is the per-stage training loop, defaulting to this module's, so stages share the
+    resume, zero-step and already-complete handling here. The order of those checks matters.
     """
 
     train_config = config["train"][stage]
     run_path = utils.get_stage_path(config, stage)
     run = get_run(run_path, model, train_config, tokenizer, init_from)
 
-    # A zero step budget trains nothing but still writes step 0, so a later stage has
-    # weights to initialise from and needs no special case of its own. That makes "build
-    # the tokenizer but do not pretrain" a config choice rather than a separate code path,
-    # and it is checked before the already-complete branch below, which a zero budget
-    # would otherwise satisfy immediately and return without saving anything.
+    # A zero step budget still writes step 0, so a later stage has weights to start from.
+    # Checked before the already-complete branch, which a zero budget would satisfy.
     if train_config["num_steps"] == 0:
         if checkpoint_steps_on_disk(f"{run_path}/checkpoints"):
             logging.info(f"{stage}: num_steps is 0 and a checkpoint already exists")

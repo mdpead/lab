@@ -7,8 +7,7 @@ from torch import Tensor
 
 
 def _length_bucket(length):
-    """The next power of two at or above `length`: what autotune keys a sequence length on.
-    """
+    """The next power of two at or above `length`, which autotune keys on."""
     return 1 << (length - 1).bit_length()
 
 

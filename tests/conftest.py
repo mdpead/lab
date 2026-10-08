@@ -21,8 +21,7 @@ def pytest_configure(config):
     )
 
 
-# The Triton kernels assert is_cuda, and every test path reaches them, so skip the
-# whole suite rather than failing confusingly on a CPU-only machine.
+# The Triton kernels need CUDA and every test reaches them, so skip the suite without it
 def pytest_collection_modifyitems(config, items):
     no_cuda = pytest.mark.skip(reason="requires CUDA")
     not_asked = pytest.mark.skip(reason="benchmark: pass --benchmark to run")
@@ -48,8 +47,7 @@ def tokenizer():
         ["hello world foo bar baz qux " * 60, "the quick brown fox jumps over " * 60],
         trainers.BpeTrainer(
             vocab_size=400,
-            # Mirrors src.tokenizer's reasoning markers. Generation must preserve tokens
-            # beyond the four framing ones, so the fixture needs at least one of them.
+            # Includes reasoning markers, which generation must preserve
             special_tokens=["<bos>", "<eos>", "<pad>", "<unk>", "<|think|>", "<|answer|>"],
         ),
     )
@@ -83,9 +81,7 @@ def make_model():
             d_ff=128,
             num_experts=4,
             top_k=2,
-            # Default high enough that no token can ever be dropped: these tests assert on
-            # shapes, masking and cache equivalence, none of which should turn on how the
-            # router happened to load an expert. Tests about capacity pass their own value.
+            # High enough by default that no token is dropped; capacity tests pass their own
             capacity_factor=capacity_factor,
             num_layers=num_layers,
             vocab_size=vocab_size,

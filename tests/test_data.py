@@ -1,10 +1,4 @@
-"""SFT data preparation: streaming into arrow, the split, and the chunk boundary.
-
-These exist because the corpus stopped fitting in host memory. prepare_sft used to hold
-every row's token ids as Python objects — roughly 5KB a row — so a million-row run died
-before reaching the GPU. Both functions now work in arrow, which changes the return types
-from lists to memory-mapped datasets and moves the split behind a filter.
-"""
+"""SFT data preparation: streaming into arrow, the split, and the chunk boundary."""
 
 import datasets
 import pytest
@@ -14,13 +8,7 @@ from src import data, dataloader
 
 @pytest.fixture(autouse=True)
 def _no_arrow_cache():
-    """Disable the datasets cache for these tests.
-
-    map() and from_generator() cache on a fingerprint of their inputs, and a cached result
-    is returned without running the function. That silently masks changes to the mapper:
-    a test asserting on drop behaviour passed against a stale cache entry while the code
-    under test had been mutated to drop nothing.
-    """
+    """Disable the datasets cache, which would otherwise mask changes to the mapper."""
     datasets.disable_caching()
     yield
     datasets.enable_caching()
@@ -49,10 +37,7 @@ def _prepared(tokenizer, num_records, **kw):
 
 
 def test_prepared_rows_are_memory_mapped_not_resident(tokenizer):
-    """The point of the change: rows live on disk and are addressed by index.
-
-    A plain list would pass every other test here while reintroducing the memory ceiling.
-    """
+    """Rows live on disk and are addressed by index, not held as a list."""
     _, ds = _prepared(tokenizer, 200)
 
     for split in ("train", "test"):
@@ -61,10 +46,7 @@ def test_prepared_rows_are_memory_mapped_not_resident(tokenizer):
 
 
 def test_rows_stay_randomly_indexable(tokenizer):
-    """Length bucketing needs random access, which an IterableDataset could not give.
-
-    This is the property that decides whether streaming is usable at all here.
-    """
+    """Length bucketing needs random access."""
     _, ds = _prepared(tokenizer, 200)
     train = ds["train"]
 
@@ -74,11 +56,7 @@ def test_rows_stay_randomly_indexable(tokenizer):
 
 
 def test_no_function_appears_in_both_splits(tokenizer):
-    """The leak the source-hash split exists to prevent.
-
-    Routing moved from a post-hoc list partition to an is_test flag set at generation and
-    applied by an arrow filter, so the guarantee is worth re-asserting on the new path.
-    """
+    """No generated function appears on both sides of the split."""
     _, ds = _prepared(tokenizer, 300)
 
     train_sources = set(ds["train"]["source"])
@@ -88,22 +66,14 @@ def test_no_function_appears_in_both_splits(tokenizer):
 
 
 def test_tokenising_keeps_every_row_that_fits(tokenizer):
-    """The batched map must neither drop a row that fits nor duplicate one.
-
-    A partial final batch is the easy case to lose, and losing it silently shortens the
-    corpus rather than raising.
-    """
+    """The batched map neither drops a row that fits nor duplicates one."""
     cfg, ds = _prepared(tokenizer, 120)
 
     assert len(ds["train"]) + len(ds["test"]) == len(data.get_dataset_sft(cfg))
 
 
 def test_token_sampler_batches_arrow_and_lists_identically(tokenizer):
-    """The sampler reads a column when offered one and falls back to per-row access.
-
-    Both paths must pack the same batches, or a result measured on one is not comparable
-    to a result measured on the other.
-    """
+    """The sampler packs the same batches from an arrow column as from a list of rows."""
     _, ds = _prepared(tokenizer, 200)
     train = ds["train"]
     as_list = [dict(row) for row in train]
@@ -121,8 +91,7 @@ def test_rows_longer_than_the_context_are_dropped(tokenizer):
     loose = data.prepare_sft(raw, tokenizer, cfg)
     # ds[col] is an arrow Column, not a list — it does not concatenate with +.
     lengths = sorted(list(loose["train"]["length"]) + list(loose["test"]["length"]))
-    # A bound inside the observed spread, so some rows fit and some do not; an over-tight
-    # bound drops every row and leaves an empty split rather than testing the drop.
+    # A bound inside the observed spread, so some rows fit and some do not
     bound = lengths[len(lengths) // 2]
 
     tight_cfg = _config(tokenizer, 200, max_length=bound)
@@ -154,14 +123,7 @@ def test_rl_prompts_are_not_the_sft_functions(tokenizer):
 
 
 def _lossless_tokenizer():
-    """One token per byte, so decoding gives back what was encoded and no token straddles
-    the edge of a span.
-
-    The shared fixture maps characters it never saw to <unk>, digits among them, which is
-    fine for shapes and lengths but not for reading targets back as text. With merges, a
-    token such as " -" would sit half inside a miss's arguments and be left out whole,
-    which is right for training and makes the expected text depend on the vocabulary.
-    """
+    """One token per byte, so targets can be read back as text and no token straddles a span."""
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
     from transformers import PreTrainedTokenizerFast
 
@@ -182,12 +144,7 @@ def _lossless_tokenizer():
 
 
 def test_search_rows_leave_exactly_the_missed_guesses_unscored():
-    """The collated targets, read back as text, are the completion with each miss's
-    arguments gone and everything else — its trace, the final guess, the answer — kept.
-
-    Checked through the collate rather than on the stored positions, since an off-by-one
-    between `ids` and the shifted targets would blank the neighbouring token instead.
-    """
+    """The collated targets, read back as text, are the completion minus each miss's arguments."""
     from src import synth
 
     tokenizer = _lossless_tokenizer()
@@ -207,8 +164,7 @@ def test_search_rows_leave_exactly_the_missed_guesses_unscored():
 
 
 def test_tasks_with_nothing_unscored_still_write_the_column(tokenizer):
-    """Every row of an output-only dataset has an empty list, which arrow would otherwise
-    type as null and then refuse to concatenate with a dataset that has positions."""
+    """An output-only dataset still writes a typed, empty `unscored` column."""
     _, ds = _prepared(tokenizer, 20)
     assert all(len(row["unscored"]) == 0 for row in ds["train"])
     assert "int" in str(ds["train"].features["unscored"])

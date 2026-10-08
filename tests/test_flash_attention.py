@@ -1,8 +1,7 @@
 """Kernel correctness against a PyTorch reference.
 
-Tolerance strategy: rather than a hand-picked atol, each comparison asserts the kernel
-is no less accurate than computing the *same reference maths in the same precision*.
-That keeps the bound meaningful as head dims and sequence lengths change.
+Rather than a hand-picked atol, each comparison asserts the kernel is no less accurate
+than the same reference maths in the same precision.
 """
 
 import pytest
@@ -19,10 +18,8 @@ PAD_CONFIGS = [[0, 0], [0, 17], [5, 40]]
 
 
 def _attention(q, k, v, seq_starts, causal, compute_dtype):
-    """Reference attention. GQA is expressed with repeat_interleave, so autograd's
-    backward through it performs exactly the group sum the dkdv kernel must reproduce.
-    Handles q_len < k_len with bottom-right causal alignment (queries are the last
-    q_len positions of the key sequence), matching the kernel's kv-cache convention."""
+    """Reference attention, with GQA via repeat_interleave. Handles q_len < k_len with
+    queries as the last q_len positions of the keys, the kernel's kv-cache convention."""
     q_len = q.shape[2]
     k_len = k.shape[2]
     head_dim = q.shape[3]
@@ -53,14 +50,11 @@ def _max_err(a, b):
 
 
 def assert_no_worse_than_reference(actual, exact, same_precision, label, slack=2.0, rel_floor=2e-2):
-    """Pass if the kernel is either no further from `exact` than the same maths in the
-    same precision (within slack), or within rel_floor of the tensor's scale.
+    """Pass if the kernel is no further from `exact` than the same maths in the same
+    precision (within slack), or within rel_floor of the tensor's scale.
 
-    The second clause matters because when the fp16 reference lands very close to fp32 the
-    ratio has a near-zero denominator and explodes on errors that are objectively tiny.
-    Measured worst-case relative error across all configs here is 5e-3, so rel_floor=2e-2
-    leaves ~4x headroom while a genuine bug (wrong head index, missing mask) produces
-    order-1 relative error and is still caught.
+    The second clause covers a near-zero denominator when the fp16 reference lands close
+    to fp32. A genuine bug produces order-1 relative error and is still caught.
     """
     err = _max_err(actual, exact)
     baseline = _max_err(same_precision, exact)
@@ -108,8 +102,7 @@ def test_backward_matches_reference(q_heads, kv_heads, pads):
     seq, head_dim, causal = 64, 32, True
     q, k, v, seq_starts = _inputs(len(pads), q_heads, kv_heads, seq, head_dim, pads, requires_grad=True)
 
-    # Weight the loss so pad-position queries contribute nothing, as a real loss with
-    # ignore_index on pad targets would.
+    # Weight the loss so pad-position queries contribute nothing
     weights = torch.zeros(len(pads), 1, seq, 1, device=DEV)
     for b, start in enumerate(pads):
         weights[b, :, start:] = 1.0
@@ -193,8 +186,7 @@ def test_forward_kv_cache_matches_reference(q_heads, kv_heads, q_len, k_len, pad
 
 @pytest.mark.parametrize("q_len", [1, 7])
 def test_suffix_queries_match_full_attention(q_len):
-    """A decode step must reproduce what full attention computes for the same rows —
-    the property incremental generation with a kv cache relies on."""
+    """A decode step reproduces what full attention computes for the same rows."""
     seq, head_dim, pads = 100, 32, [0, 12]
     q, k, v, seq_starts = _inputs(len(pads), 8, 2, seq, head_dim, pads)
 
@@ -220,12 +212,7 @@ def test_backward_rejects_kv_cache_shapes():
         out.float().sum().backward()
 
 
-# --- Cross-check against torch's fused SDPA ---
-#
-# The reference above is our own eager maths, so a misread of the attention definition
-# would be baked into both sides. torch.nn.functional.scaled_dot_product_attention is an
-# independent implementation, and covers longer sequences than the correctness tests above
-# (which stay at seq 64 to keep the parametrised matrix cheap).
+# --- Cross-check against torch's fused SDPA, an independent implementation ---
 
 SDPA_SEQS = [128, 256, 512, 1024]
 

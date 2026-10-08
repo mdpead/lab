@@ -9,10 +9,7 @@ from functools import partial
 class InfiniteRandomSampler(Sampler):
     """Endless reshuffled row indices, resumable to an exact position.
 
-    `batch_size` is only needed to resume: this yields rows, the training loop counts
-    minibatches, and a fixed batch size is the bridge between them. It is fixed only
-    because pretrain blocks are all one length; leave it None where resume is not wanted
-    and start_minibatch will refuse rather than compute a wrong offset.
+    `batch_size` is only needed to resume, to convert the loop's minibatch count to rows.
     """
 
     def __init__(self, data_source, seed, start_index=0, batch_size=None):
@@ -52,43 +49,26 @@ class InfiniteRandomSampler(Sampler):
 class TokenSampler(Sampler):
     """Group rows of similar length into batches that fit a token budget.
 
-    Padding makes a batch cost len(batch) * its longest row, not the sum of its rows, so
-    that product is what the budget is checked against. Sorting by length first keeps the
-    two close, which is what keeps the padding waste low in the first place.
+    A padded batch costs len(batch) * its longest row, so that is what the budget checks.
 
-    Deliberately no __len__: iteration never ends, so any length this could return would
-    describe one pass and not the thing being iterated. Callers that want a bounded number
-    of batches take them explicitly, as validation_step does with islice; a __len__ here
-    would let `for batch in loader` look finite and hang instead. InfiniteRandomSampler
-    omits one for the same reason.
-
-    Sampler rather than BatchSampler, despite being passed as batch_sampler=. DataLoader
-    only requires an iterable of index lists, and BatchSampler brings a __len__ that reads
-    self.drop_last and self.sampler — attributes its __init__ would set and this one does
-    not — so inheriting it turns len(loader) into a confusing AttributeError instead of
-    the TypeError that says no length exists.
+    No __len__, because iteration never ends. A plain Sampler rather than a BatchSampler,
+    whose inherited __len__ would fail confusingly.
     """
 
     def __init__(self, ds, token_batch_size, seed, start_minibatch=0):
         self.token_batch_size = token_batch_size
         self.seed = seed
-        # Each yielded item is one minibatch, so no conversion is needed here — unlike
-        # InfiniteRandomSampler, which yields rows and needs a batch size to translate.
         self.start_minibatch = start_minibatch
         self.batches = self.generate_batches(ds)
 
     def generate_batches(self, ds):
-        # Read `length` as a whole column where the dataset offers one. Row-at-a-time
-        # access on an arrow-backed dataset materialises each row through Python — about
-        # 70us apiece, so tens of seconds over a corpus this runs over twice. Plain lists
-        # of dicts have no column to read, hence the fallback.
+        # Read `length` as a whole column where the dataset has one: row-at-a-time access
+        # on an arrow dataset is slow. Plain lists of dicts fall back to rows.
         if hasattr(ds, "column_names"):
             lengths = list(ds["length"])
         else:
             lengths = [row["length"] for row in ds]
 
-        # Position in the dataset is the index the DataLoader will ask for. `length` is
-        # the model input length prepare_sft recorded for exactly this purpose.
         order = sorted(range(len(lengths)), key=lengths.__getitem__)
 
         batches = []
@@ -96,8 +76,7 @@ class TokenSampler(Sampler):
         longest = 0
         for idx in order:
             length = lengths[idx]
-            # A row longer than the whole budget still gets its own batch rather than
-            # being dropped — prepare_sft already dropped what does not fit the context.
+            # A row over the whole budget still gets its own batch
             if max(longest, length) * (len(batch) + 1) > self.token_batch_size and batch:
                 batches.append(batch)
                 batch, longest = [], 0
@@ -115,30 +94,15 @@ class TokenSampler(Sampler):
 class PromptSampler(TokenSampler):
     """Fixed-size batches of similar-length prompts, endlessly reshuffled.
 
-    A prompt count rather than TokenSampler's token budget, because the two things that
-    make a budget the right unit for SFT are both absent here. A rollout's cost is
-    len(batch) * (longest prompt + max_new_tokens), and max_new_tokens is identical for
-    every row and usually the larger term, so bounding prompt tokens bounds the wrong
-    half. And the group size multiplies the batch afterwards, which a sampler counting
-    prompt tokens cannot see at all.
-
-    The count is also what keeps the loss stable: GRPO normalises advantages within each
-    prompt's group and averages over groups, so a batch that varies in prompt count varies
-    how many groups a step averages over, and with it the scale of the gradient.
-
-    Sorting by length first still earns its place — generation left-pads to the longest
-    prompt in the batch, so grouping similar lengths is what keeps the padding, and the
-    rollout compute spent on it, small. That is what prepare_rl records `length` for.
-
-    The final batch of a pass is short whenever the split does not divide evenly. It is
-    kept rather than dropped: the sort is deterministic, so the remainder is always the
-    same longest prompts, and dropping it would exclude them from training entirely.
+    A prompt count rather than a token budget: a rollout's cost is dominated by
+    max_new_tokens, which is the same for every row. Sorting by length keeps left-padding
+    small. The short final batch of a pass is kept, since dropping it would always exclude
+    the same longest prompts.
     """
 
     def __init__(self, ds, prompts_per_batch, seed, start_minibatch=0):
         self.prompts_per_batch = prompts_per_batch
-        # token_batch_size is left unset by this path — generate_batches below replaces
-        # the budget rule that reads it.
+        # No token budget: generate_batches below replaces the rule that reads it
         super().__init__(ds, None, seed, start_minibatch)
 
     def generate_batches(self, ds):
@@ -151,17 +115,11 @@ class PromptSampler(TokenSampler):
 
 
 def _reshuffled_forever(batches, seed, skip):
-    """Yield batches forever, reshuffling each pass, resuming `skip` batches in.
-
-    Shared by both batch samplers: the resume arithmetic is the fiddly part, and having
-    one copy is what keeps a resumed run continuing the shuffle rather than replaying the
-    first pass.
-    """
+    """Yield batches forever, reshuffling each pass, resuming `skip` batches in."""
     rng = random.Random(seed)
     while True:
         order = rng.sample(batches, len(batches))
-        # Fast-forward whole passes without yielding, drawing from the RNG as we go so a
-        # resumed run continues the shuffle rather than replaying the first pass.
+        # Fast-forward whole passes, still drawing from the RNG so the shuffle continues
         if skip >= len(order):
             skip -= len(order)
             continue
@@ -171,24 +129,14 @@ def _reshuffled_forever(batches, seed, skip):
 
 
 def collate_rl_batch(batch):
-    """Hand the rows straight through.
-
-    Nothing to tokenise or pad: generate() owns both, which is why prepare_rl leaves the
-    prompt as text. The rest of the row travels with it because scoring a rollout means
-    executing the function that produced the prompt — synth's checkers read `task`,
-    `source`, `args` and `result` off the record, and there is nowhere else to recover
-    them once the batch is a list of strings.
-    """
+    """Hand the rows straight through: generate() tokenises, and scoring needs the whole row."""
     return batch
 
 
 def collate_sft_batch(batch, pad_token_id):
     """Pad to the batch maximum and mask the prompt, and any unscored spans, out of the targets.
 
-    Rows are variable length here, unlike pretrain's fixed blocks, so padding is per batch
-    rather than absent. Prompt positions are overwritten in output_ids only: the model
-    still reads the prompt through input_ids, it is just not scored on predicting it,
-    since criterion is built with ignore_index=pad_token_id.
+    Masked positions are overwritten in output_ids only, so the model still reads them.
     """
     max_len = max(len(row["ids"]) for row in batch)
     ids = torch.full((len(batch), max_len), pad_token_id, dtype=torch.long)
@@ -196,14 +144,10 @@ def collate_sft_batch(batch, pad_token_id):
         ids[i, : len(row["ids"])] = torch.tensor(row["ids"], dtype=torch.long)
 
     input_ids = ids[:, :-1]
-    # A view would alias input_ids, so the prompt masking below would blank the model's
-    # own input as well as the targets.
+    # Cloned, so masking the targets below does not blank the input as well
     output_ids = ids[:, 1:].clone()
 
-    # The shift puts the first completion target at prompt_len - 1; everything before it
-    # is prompt. Trailing pad positions already hold pad_token_id and need no masking.
-    # A task can also leave parts of its completion unscored (data._TASK_UNSCORED), by
-    # position in `ids`; the target for position p sits at p - 1, as above.
+    # The target for position p in `ids` sits at p - 1. Trailing pads need no masking.
     for i, row in enumerate(batch):
         output_ids[i, : row["prompt_len"] - 1] = pad_token_id
         for position in row.get("unscored", ()):
@@ -222,9 +166,7 @@ def collate_lm_batch(batch, pad_token_id):
     return {
         "input_ids": input_ids[:, :-1],
         "padding_mask": padding_mask[:, :-1],
-        # CrossEntropyLoss requires Long targets. A no-op while with_format("torch") hands
-        # back int64, but the ids are stored int32 and this is the only place that would
-        # break if that ever changed.
+        # CrossEntropyLoss needs Long targets, and the ids are stored int32
         "output_ids": input_ids[:, 1:].long(),
     }
 
@@ -245,8 +187,7 @@ def create_dataloaders_pretrain(
         split_prefetch_factor = None if split_num_workers == 0 else prefetch_factor
 
         batch_size = train_config["minibatch_token_size"] // config["model"]["max_length"]
-        # batch_size reaches the sampler only so resume_at_minibatch can convert the training
-        # loop's minibatch count into the row offset this sampler indexes by.
+        # batch_size lets the sampler convert a minibatch count into a row offset on resume
         sampler = (
             InfiniteRandomSampler(ds[split], config["seed"], batch_size=batch_size)
             if split == "train"
@@ -298,12 +239,8 @@ def create_dataloaders_rl(
 ):
     """Batches of prompt rows for rollout generation.
 
-    No workers and no pinned memory, unlike the trained stages: both exist to overlap
-    tokenising and tensor-building with the GPU, and collate_rl_batch does neither. Rows
-    are already plain dicts in memory, so a worker would fork a process to hand one back.
-
-    `tokenizer` is unused and kept only so the three create_dataloaders_* functions share
-    a signature; the tokenising this stage needs happens inside generate().
+    No workers or pinned memory: rows are plain dicts and generate() does the tokenising.
+    `tokenizer` is unused, kept so the create_dataloaders_* functions share a signature.
     """
     train_config = config["train"]["rl"]
 
@@ -316,10 +253,7 @@ def create_dataloaders_rl(
                 )
             }
         else:
-            # One bounded pass in dataset order: a pass-rate is only comparable across
-            # steps if every measurement runs on the same prompts, and an infinite
-            # sampler here would make `for batch in loader` hang instead. Its own size,
-            # so validation can decode more rows at once than training chooses to.
+            # One bounded pass in dataset order, so every validation sees the same prompts
             batch_size = train_config.get(
                 "validation_prompts_size", train_config["generation_prompts_size"]
             )
@@ -337,18 +271,8 @@ def create_dataloaders_rl(
 def resume_at_minibatch(dataloader, n_minibatches):
     """Fast-forward a train loader past n_minibatches without reading any data.
 
-    Both samplers expose start_minibatch in the training loop's own unit and convert to
-    their native indexing themselves, so this does not need to know which stage it is
-    handed. The lookup matters: when a batch_sampler is set, DataLoader still builds a
-    plain sampler and never reads it, so writing resume state onto `.sampler` is silently
-    discarded — which is exactly how this failed before. `batch_size is None` is torch's
-    own signal for "a custom batch_sampler owns the grouping here".
-
-    The check is for a resumable sampler, not for the train split. It catches pretrain's
-    test loader, whose sampler is a stock SequentialSampler, but not SFT's, which uses the
-    same TokenSampler class as its train split. Resuming a validation loader would skip
-    batches and make validation loss incomparable across restarts, so call this on the
-    train split only.
+    With a batch_sampler set, DataLoader still builds a plain `.sampler` it never reads,
+    so the resume state must go on whichever one is in use. Call on the train split only.
     """
     sampler = dataloader.batch_sampler if dataloader.batch_size is None else dataloader.sampler
     if not hasattr(sampler, "start_minibatch"):

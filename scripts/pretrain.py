@@ -2,9 +2,7 @@ from src import data, tokenizer, model, train, utils, dataloader
 import logging
 
 
-# Everything runs under a __main__ guard: DataLoader workers re-import this module
-# (Python 3.14 defaults to the forkserver start method), so module-level work would
-# be repeated in every worker.
+# Everything runs under a __main__ guard, because DataLoader workers re-import this module
 def main():
 
     logging.basicConfig(level=logging.INFO)
@@ -14,8 +12,7 @@ def main():
 
     ds_raw = data.get_dataset_pretrain(config)
 
-    # Trains the BPE on first run and loads it after, which is why the raw dataset has to
-    # exist before this line: it is the corpus the vocabulary is built from.
+    # Trains the BPE on first run and loads it after, so the raw dataset must exist first
     token = tokenizer.get_tokenizer(ds_raw, config)
 
     ds = data.prepare_pretrain(ds_raw, token, config)

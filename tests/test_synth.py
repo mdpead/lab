@@ -7,11 +7,7 @@ from src import synth
 
 @pytest.mark.parametrize("inputs_per_fn", [0, 1])
 def test_generate_rejects_too_few_inputs(inputs_per_fn):
-    """Fewer than two inputs can never satisfy the distinctness filter.
-
-    Without this check the while loop rejects every candidate and spins forever, which is
-    far harder to diagnose than an exception.
-    """
+    """Fewer than two inputs can never satisfy the distinctness filter, and would hang."""
     with pytest.raises(ValueError, match="inputs_per_fn must be at least 2"):
         list(synth.generate(1, tier="easy", inputs_per_fn=inputs_per_fn))
 
@@ -44,11 +40,7 @@ def _record():
 
 
 def test_completion_wraps_trace_and_answer_in_markers():
-    """The markers are the contract between the formatter and the reward path.
-
-    Round-tripping format through extract cannot catch a change here, since moving both
-    together stays self-consistent while breaking anything trained on the old shape.
-    """
+    """The markers are the contract between the formatter and the reward path."""
     r = _record()
     _, completion = synth.format_output_task(r, include_trace=True)
 
@@ -70,8 +62,7 @@ def test_untraced_completion_has_no_thinking_markers():
 
 
 def test_markers_cannot_occur_in_generated_source():
-    """Why the delimiters are pipe-guarded tokens rather than "#" comments: a comment
-    marker could in principle be generated, and would split the answer in the wrong place."""
+    """The delimiters must never appear in generated source, or the answer would split wrongly."""
     for r in synth.generate(200, tier="easy", seed=11, inputs_per_fn=4):
         assert "<|" not in r["source"]
         assert "<|" not in r["trace"]
@@ -87,8 +78,7 @@ def test_extract_answer_reads_a_complete_rollout():
 
 
 def test_extract_answer_recovers_a_rollout_truncated_before_the_closing_marker():
-    """A rollout that hit its token budget mid-answer still has a usable first line;
-    returning the whole tail instead would never parse."""
+    """A rollout cut off mid-answer still has a usable first line."""
     r = _record()
     _, completion = synth.format_output_task(r, include_trace=True)
     truncated = completion.replace(synth.ANSWER_CLOSE, "")
@@ -123,11 +113,7 @@ def _split_search(completion):
 
 
 def test_search_completion_ends_on_the_first_attempt_that_reaches_the_target():
-    """What sft teaches about stopping: every attempt before the last misses, the last hits.
-
-    If a miss could come last, or a hit come early, the data would show stopping as
-    unrelated to the result, and the model would learn to stop on a count instead.
-    """
+    """Every attempt before the last misses and the last hits, so stopping tracks the result."""
     counts = set()
     for r in _search_records():
         prompt, completion = synth.format_search_task(r, include_trace=True)
@@ -145,16 +131,14 @@ def test_search_completion_ends_on_the_first_attempt_that_reaches_the_target():
 
 
 def test_search_completion_is_deterministic_and_asks_the_input_question():
-    """The misses are random, so they are seeded from the record: sft's cached dataset and
-    a regenerated one must hold the same text. The prompt is the input task's unchanged."""
+    """Misses are seeded from the record, and the prompt is the input task's unchanged."""
     r = _search_records(1)[0]
     assert synth.format_search_task(r, True) == synth.format_search_task(r, True)
     assert synth.format_search_task(r, False) == synth.format_input_task(r, False)
 
 
 def test_every_attempt_sft_shows_is_a_faithful_one():
-    """The formatter and the reward's faithfulness check must agree on what an attempt
-    looks like, or rl would start by penalising exactly what sft taught."""
+    """The formatter and the reward's faithfulness check agree on what an attempt looks like."""
     for r in _search_records():
         prompt, completion = synth.format_search_task(r, include_trace=True)
         attempts = synth.extract_attempts(completion)
@@ -180,8 +164,7 @@ _MISS = "try 1, 3\na += b  ->  a = 4\nb = (a * 2)  ->  b = 8\nreturn a, b  ->  (
 
 
 def test_search_reward_ranks_rollouts_the_answer_alone_leaves_tied():
-    """The orderings the graded terms exist to produce, each between two rollouts a
-    correct-or-not reward scores the same."""
+    """The graded terms order rollouts that a correct-or-not reward scores the same."""
     reward = lambda think, answer: synth.reward_search_answer(
         _SEARCH_RECORD, _search_rollout(think, answer)
     )
@@ -238,11 +221,7 @@ def test_search_stats_separate_a_first_try_hit_from_a_later_one():
 
 
 def test_miss_argument_spans_cover_every_guess_but_the_one_that_hits():
-    """What sft leaves unscored: the arguments of each miss, and nothing else.
-
-    The last attempt's arguments stay scored, since they are the only guess in the
-    completion worth learning to make, and so does every trace line, hit or miss.
-    """
+    """SFT leaves unscored the arguments of each miss, and nothing else."""
     seen_misses = False
     for r in _search_records():
         _, completion = synth.format_search_task(r, include_trace=True)

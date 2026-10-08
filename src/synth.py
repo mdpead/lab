@@ -3,26 +3,20 @@ import random
 import re
 import sys
 
-# Values stay small on purpose: the task should be hard because tracing control flow is
-# hard, not because a 30M model cannot multiply four-digit numbers. Programs that escape
-# the range are rejected after execution rather than clamped, since clamping would mean
-# sprinkling modulo noise through the source.
+# Values stay small so the task is hard because of control flow, not arithmetic. Programs
+# that leave the range are rejected after execution rather than clamped.
 VALUE_MIN, VALUE_MAX = -500, 500
 MAX_RESULT_CHARS = 80
 
-# Loop variables are named per nesting depth so an inner loop never shadows its parent.
+# Named per nesting depth so an inner loop never shadows its parent
 LOOP_VARS = ["i", "j", "k"]
 INT_VARS = ["a", "b", "c", "d"]
 LIST_VARS = ["xs", "ys"]
 
-# A nested loop whose bound is len() of a list the body appends to still terminates, but it
-# can run for hundreds of lines. Capping executed lines bounds both the trace length and the
-# work spent generating a sample that would be discarded for being too long anyway. Retune
-# these against your own tokenizer: the budget that matters is trace tokens, and RL needs
-# headroom above the pretraining length for responses to grow into.
+# max_executed caps executed lines, bounding trace length. Retune against the tokenizer:
+# the budget that matters is trace tokens, and RL needs headroom above it.
 TIERS = {
-    # max_depth 0 is straight-line code: no branches, no loops, so the answer is a short
-    # chain of arithmetic. This is the tier a freshly pretrained model can actually do.
+    # max_depth 0 is straight-line code, which a freshly pretrained model can do
     "easy": dict(n_stmts=(3, 5), max_depth=0, n_ints=2, n_lists=0, loop_range=(2, 3), max_executed=25),
     "medium": dict(n_stmts=(4, 7), max_depth=1, n_ints=2, n_lists=1, loop_range=(2, 4), max_executed=45),
     "hard": dict(n_stmts=(6, 10), max_depth=2, n_ints=3, n_lists=2, loop_range=(2, 5), max_executed=70),
@@ -34,8 +28,7 @@ class _TooLong(Exception):
 
 
 def _gen_expr(rng, scope, depth=0):
-    # Depth here is expression nesting, unrelated to statement nesting; two levels keeps
-    # lines readable while still forcing more than one arithmetic step per line.
+    # depth is expression nesting, not statement nesting
     choices = ["int_var", "literal"]
     if scope["lists"]:
         choices += ["index", "len"]
@@ -50,8 +43,7 @@ def _gen_expr(rng, scope, depth=0):
     if kind == "len":
         return f"len({rng.choice(scope['lists'])})"
     if kind == "index":
-        # Lists are only ever appended to, never emptied, so they are always non-empty and
-        # the modulo keeps the index in bounds however long the list has grown.
+        # Lists are only appended to, so they are non-empty and the modulo stays in bounds
         name = rng.choice(scope["lists"])
         return f"{name}[{rng.choice(scope['ints'])} % len({name})]"
     left = _gen_expr(rng, scope, depth + 1)
@@ -89,10 +81,7 @@ def _gen_stmt(rng, scope, depth, cfg, indent):
         return lines
 
     var = LOOP_VARS[depth]
-    # range() over a literal or over len(list). Both evaluate their bound once, before the
-    # first iteration, so a body that appends to the list it is iterating still terminates —
-    # which "for x in xs: xs.append(...)" would not. That is why the len() form is used
-    # instead of iterating the list directly.
+    # range() evaluates its bound once, so a body that appends to the list still terminates
     if scope["lists"] and rng.random() < 0.4:
         bound = f"len({rng.choice(scope['lists'])})"
     else:
@@ -136,8 +125,7 @@ def _sample_args(rng, params):
 
 
 def _snapshot(frame):
-    # Lists are copied because append mutates in place, which an identity-sharing snapshot
-    # would compare equal to itself and report as unchanged.
+    # Lists are copied, because append mutates in place
     return {
         k: (list(v) if isinstance(v, list) else v)
         for k, v in frame.f_locals.items()
@@ -148,9 +136,7 @@ def _snapshot(frame):
 def _run_traced(source, code_obj, func, args, max_executed):
     """Call func(*args) under a tracer, returning (result, trace_steps, n_executed).
 
-    Returns None if the call raises or any value escapes the allowed range. Rejection
-    rather than repair: the generator produces thousands per second, so throwing a sample
-    away is cheaper than patching it up.
+    Returns None if the call raises or any value escapes the allowed range.
     """
     src_lines = source.split("\n")
     steps = []
@@ -161,13 +147,11 @@ def _run_traced(source, code_obj, func, args, max_executed):
         if frame.f_code is not code_obj:
             return None
         if event == "call":
-            # Seed from the bound parameters so the trace opens with the first real
-            # statement rather than restating the arguments as if they had changed.
+            # Seed from the parameters so the trace does not restate the arguments
             prev.update(_snapshot(frame))
             return tracer
         if event == "line":
-            # Python reports a line event before executing that line, so the state visible
-            # here is the result of the previous one.
+            # A line event fires before the line runs, so this state is the previous line's
             current = _snapshot(frame)
             changed = {k: v for k, v in current.items() if prev.get(k, object()) != v}
             for value in changed.values():
@@ -181,8 +165,7 @@ def _run_traced(source, code_obj, func, args, max_executed):
             prev.update(current)
             steps.append(src_lines[frame.f_lineno - 1].strip())
             if len(steps) > max_executed:
-                # Raising here unwinds the traced call itself, so an over-long program is
-                # abandoned partway rather than run to completion and then discarded.
+                # Abandon an over-long program partway
                 raise _TooLong
         return tracer
 
@@ -199,8 +182,7 @@ def _run_traced(source, code_obj, func, args, max_executed):
     return result, steps, len(steps)
 
 
-# The longest run any tier allows. Tracing outside generate() has a source and arguments
-# but no tier to read a cap from, and only needs the run to be bounded.
+# The longest run any tier allows, for tracing outside generate() where there is no tier
 _MAX_EXECUTED = max(cfg["max_executed"] for cfg in TIERS.values())
 
 
@@ -217,9 +199,7 @@ def _trace_call(source, args):
 
 def generate(n, tier="medium", seed=0, inputs_per_fn=4, with_trace=True):
     """Yield n records, sharing each generated function across several sampled inputs."""
-    # The distinctness filter below compares results across a function's inputs, so with
-    # fewer than two it can never be satisfied: every candidate is rejected and the loop
-    # spins forever instead of returning. Fail here rather than hang.
+    # The distinctness filter below can never pass with fewer than two inputs
     if inputs_per_fn < 2:
         raise ValueError(
             f"inputs_per_fn must be at least 2, got {inputs_per_fn}. One input cannot show "
@@ -240,8 +220,7 @@ def generate(n, tier="medium", seed=0, inputs_per_fn=4, with_trace=True):
         namespace = {}
         exec(code_obj, namespace)
         func = namespace["f"]
-        # compile() above yields the module code; the tracer needs the function's own code
-        # object, since that is the frame the body executes in.
+        # The tracer needs the function's own code object, not the module's
         func_code = func.__code__
 
         batch = []
@@ -257,17 +236,14 @@ def generate(n, tier="medium", seed=0, inputs_per_fn=4, with_trace=True):
                     "args": args,
                     "result": result,
                     "tier": tier,
-                    # Executed-line count is the difficulty signal worth filtering on, and
-                    # it varies across inputs to the same function whenever a loop bound
-                    # depends on a list argument.
+                    # The difficulty signal; varies per input when a loop bound is a list
                     "n_executed": n_executed,
                     **({"trace": "\n".join(steps)} if with_trace else {}),
                 }
             )
 
-        # A function that ignores its arguments makes output prediction memorisable and
-        # input prediction trivially satisfiable by anything, so require that the input
-        # actually moves the result.
+        # Require that the input actually moves the result: otherwise output prediction
+        # is memorisable and input prediction is satisfied by anything.
         if len({repr(r["result"]) for r in batch}) < 2:
             continue
 
@@ -282,9 +258,7 @@ def _call_repr(args):
     return f"f({', '.join(repr(a) for a in args)})"
 
 
-# Single tokens in the trained tokenizer, so a delimiter costs one token rather than the
-# nine "# Trace:\n" takes once digits split. They also cannot occur in generated source,
-# unlike a "#" comment, so splitting on them can never catch a fragment of the function.
+# Single tokens in the trained tokenizer, which cannot occur in generated source
 THINK_OPEN, THINK_CLOSE = "<|think|>", "<|/think|>"
 ANSWER_OPEN, ANSWER_CLOSE = "<|answer|>", "<|/answer|>"
 
@@ -308,12 +282,10 @@ def format_input_task(record, include_trace):
     return prompt, f"{body}{ANSWER_OPEN}{answer}{ANSWER_CLOSE}"
 
 
-# Opens each attempt in the search task's thinking. Plain text rather than a reserved
-# token: it only has to be told apart from a line of the function, and no statement the
-# generator writes starts with it.
+# Opens each attempt in the search task's thinking. No generated statement starts with it.
 TRY_PREFIX = "try "
-# Missed guesses shown before the one that works, at most. The count varies per example so
-# that stopping follows from the attempt reaching the target, not from how many came before.
+# Most missed guesses shown before the one that works. The count varies per example so
+# that stopping follows from reaching the target, not from how many came before.
 MAX_MISSES = 2
 
 
@@ -347,11 +319,7 @@ def _perturb(rng, args):
 
 
 def _sample_misses(rng, record, n):
-    """Up to n distinct argument sets near the record's own that do not reach its result.
-
-    Fewer when the function leaves little room to miss: an argument that is overwritten
-    can be changed freely and the result still comes out right.
-    """
+    """Up to n distinct argument sets near the record's own that do not reach its result."""
     misses, seen = [], {repr(record["args"])}
     for _ in range(n * 8):
         if len(misses) == n:
@@ -369,16 +337,11 @@ def _sample_misses(rng, record, n):
 
 
 def format_search_task(record, include_trace):
-    """Input prediction with room to search: guess arguments, trace them, try again.
+    """Input prediction as a search: guess arguments, trace them, try again.
 
-    format_input_task traces forwards from arguments the model must already have chosen,
-    so finding them has to happen before anything is written. Here the thinking is a run
-    of attempts, each one a guess, its trace and the value it returns, ending on the first
-    that returns the target. Every line is still forward execution; what is new is choosing
-    the next guess with the last miss in view.
-
-    The misses are drawn from a generator seeded by the record, so the same record always
-    formats the same way. They are there to be read, not imitated: see miss_argument_spans.
+    The thinking is a run of attempts, each a guess, its trace and the value returned,
+    ending on the first that returns the target. Misses come from a generator seeded by
+    the record, so formatting is deterministic. See miss_argument_spans.
     """
     prompt, completion = format_input_task(record, False)
     if not include_trace:
@@ -399,14 +362,8 @@ _TRY_LINE = re.compile(
 def miss_argument_spans(completion):
     """Character spans of the arguments each missed attempt in a search completion tries.
 
-    These are what sft must not be scored on. A miss is in the data so the model learns to
-    trace a guess, see it fall short and go on; trained to predict the missed arguments
-    themselves, it learns to open with a wrong guess, and did: two thirds of examples
-    start with a miss, and first attempts came out right 28% of the time against 49% for
-    the input task's single guess. With these left out, every guess the model is trained
-    to make is one that reaches the target.
-
-    Every attempt but the last is a miss, which is how format_search_task builds them.
+    SFT must not be scored on these: trained to predict missed arguments, the model learns
+    to open with a wrong guess. Every attempt but the last is a miss.
     """
     return [match.span(1) for match in _TRY_LINE.finditer(completion)][:-1]
 
@@ -416,9 +373,7 @@ def extract_answer(completion):
     if ANSWER_OPEN not in completion:
         return None
     answer = completion.split(ANSWER_OPEN)[-1]
-    # Bounded by the closing marker when the rollout produced one, and by the first line
-    # break otherwise — a run that hit its token budget mid-answer still has a usable
-    # first line, and returning the whole remaining tail would never parse.
+    # Up to the closing marker, or the first line break if the rollout was cut off
     return answer.split(ANSWER_CLOSE)[0].strip().split("\n")[0].strip()
 
 
@@ -449,9 +404,7 @@ def _answered_args(completion):
 def _answer_result(record, completion):
     """What the record's function returns for the arguments answered, or _NO_RESULT.
 
-    literal_eval parses literals only and never executes, so the model's answer cannot run
-    code — the only thing executed is the generator's own function, called with the parsed
-    values.
+    literal_eval never executes, so only the generator's own function is run.
     """
     args = _answered_args(completion)
     if args is None:
@@ -494,9 +447,7 @@ def _attempt_args(attempt):
 def _is_faithful(record, attempt):
     """Whether an attempt is what the function really does with the arguments it tries.
 
-    Compared as text against the formatter's own rendering, so a wrong value, a skipped
-    line and a misreported return all fail the same way. Arguments the tracer rejects —
-    a run that raises or leaves the value range — cannot be written faithfully at all.
+    Compared as text against the formatter's own rendering of the real trace.
     """
     args = _attempt_args(attempt)
     outcome = _trace_call(record["source"], args) if args is not None else None
@@ -509,10 +460,8 @@ def _is_faithful(record, attempt):
 def search_stats(record, completion):
     """How a search rollout went, beyond whether its answer was right.
 
-    A pass rate alone cannot tell a model that guesses better from one that guesses more:
-    with room for several attempts, more tries lift it on their own. `first_try_solved` is
-    whether the first attempt's arguments reach the target, checked by running them, and
-    is the figure that only better guessing moves.
+    `first_try_solved` is the figure only better guessing moves: more attempts lift the
+    pass rate on their own.
     """
     attempts = extract_attempts(completion)
     first = _attempt_args(attempts[0]) if attempts else None
@@ -524,26 +473,20 @@ def search_stats(record, completion):
     }
 
 
-# Reward terms beside the 1.0 for a correct answer. Small against it on purpose: they are
-# there to rank rollouts the answer alone leaves tied, not to compete with getting it right.
+# Reward terms beside the 1.0 for a correct answer, kept small so they only break ties
 REWARD_MATCH = 0.25  # a wrong answer, scaled by the fraction of returned values it got
 REWARD_FAITHFUL = 0.25  # scaled by the fraction of attempts traced as the function runs
 ATTEMPT_COST = 0.02  # per attempt after the first
 
 
 def reward_search_answer(record, completion):
-    """Graded reward for the search task. check_input_answer stays the measure of success.
+    """Graded reward for the search task, all decided by running the function.
 
-    A correct-or-not reward says nothing about the thinking, and a model can then write a
-    trace that matches neither the function nor its answer. Everything here is still
-    decided by running the function:
-
-    - 1.0 for arguments that reach the target, else REWARD_MATCH for each returned value
-      they do get, in proportion.
+    - 1.0 for arguments that reach the target, else REWARD_MATCH in proportion to the
+      returned values they do get.
     - REWARD_FAITHFUL for attempts whose trace is the real one. The last attempt counts
-      only if the answer repeats its arguments, so the answer has to come from the search.
-    - ATTEMPT_COST off for each attempt after the first, so a better first guess beats a
-      longer search and guessing until the budget runs out is not free.
+      only if the answer repeats its arguments.
+    - ATTEMPT_COST off for each attempt after the first.
     """
     result = _answer_result(record, completion)
     if result == record["result"]:

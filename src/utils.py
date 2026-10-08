@@ -15,11 +15,7 @@ def get_run_path(config):
 
 
 def get_stage_path(config, stage):
-    """Per-stage artifacts: checkpoints, results, and that stage's config snapshot.
-
-    One directory per stage, so SFT does not find pretrain's checkpoints and inherit its
-    step counter and optimiser state, and so restarting one stage leaves the others alone.
-    """
+    """Per-stage artifacts: checkpoints, results, and that stage's config snapshot."""
     return f"{get_run_path(config)}/{stage}"
 
 
@@ -51,11 +47,9 @@ RESUMABLE_KEYS = {
 
 
 def _stage_fingerprint(config, stage):
-    """The part of a config that this stage's checkpoints actually depend on.
+    """The part of a config that this stage's checkpoints depend on.
 
-    Scoped to one stage so that editing data.sft restarts SFT and not pretraining, and
-    stripped of the keys that can change mid-run — step budgets, worker counts — without
-    invalidating a checkpoint.
+    Scoped to one stage, and stripped of the keys that can change mid-run.
     """
     fingerprint = {key: config.get(key) for key in SHARED_SECTIONS}
     train_config = config.get("train", {}).get(stage) or {}
@@ -72,24 +66,14 @@ def set_seed(seed):
 
 
 def _start_file_log(stage_path, stage, cleared):
-    """Tee the root logger into the stage directory, alongside that stage's checkpoints.
-
-    Training runs for days and is usually detached, so the record has to outlive whatever
-    terminal launched it. Opened in append mode: a resume continues the same file rather
-    than erasing what the attempt before it recorded.
-
-    The file handler carries timestamps the console one does not. They cost nothing and are
-    the only way to recover a steps/hour rate after the fact.
-    """
+    """Tee the root logger into the stage directory, with timestamps, in append mode."""
     log_path = f"{stage_path}/{stage}.log"
     handler = logging.FileHandler(log_path)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logging.getLogger().addHandler(handler)
     logging.info(f"--- {stage} starting, logging to {log_path} ---")
     if cleared:
-        # Logged again here because the warning that triggered the clear was written before
-        # this handler existed, so the file would otherwise start with no explanation of why
-        # its history is missing.
+        # The warning that triggered the clear was logged before this handler existed
         logging.info(f"{stage_path} was cleared first: the saved config no longer matched")
     return log_path
 
@@ -101,9 +85,8 @@ def init_run(config, stage):
     stage_path = get_stage_path(config, stage)
     os.makedirs(stage_path, exist_ok=True)
 
-    # The tokenizer outlives any single stage's restart, and get_tokenizer loads it from disk
-    # whenever the directory exists — so without its own check a changed vocab_size would be
-    # silently ignored rather than retrained.
+    # The tokenizer is loaded from disk whenever it exists, so a changed tokenizer config
+    # needs its own check or it would be silently ignored.
     if os.path.exists(f"{run_path}/config.json"):
         existing = load_config(run_path)
         if existing.get("tokenizer") != config.get("tokenizer"):
@@ -121,9 +104,7 @@ def init_run(config, stage):
             cleared = True
     save_config(stage_path, config)
 
-    # Attached only now: the clear above would leave the handler holding an open descriptor
-    # on a deleted file, and everything logged before this point describes the previous run
-    # rather than this one.
+    # Attached only now, after any clear of the directory the log file lives in
     _start_file_log(stage_path, stage, cleared)
     return stage_path
 

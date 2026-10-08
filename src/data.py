@@ -10,12 +10,9 @@ from torch.utils.data import Dataset
 from src import synth
 
 
-# StarCoder's training format prefixes ~48% of files with metadata markers, sometimes
-# several concatenated onto the first line ("<filename>x.py<gh_stars>1-10\ncode..."). They
-# were special tokens in StarCoder's own tokenizer; ours splits them into literal subwords,
-# and half the corpus does not even parse as Python until they are gone. Anchored to the
-# start of the file, so the few legitimate occurrences deeper in real source survive, and
-# requiring the trailing newline, so a marker-only file is left alone rather than emptied.
+# StarCoder prefixes ~48% of files with metadata markers on the first line, and the files
+# do not parse as Python until they are gone. Anchored to the start of the file, and
+# requiring the newline so a marker-only file is left alone.
 _MARKER_PREFIX = re.compile(r"^<(?:reponame|filename|gh_stars)>[^\n]*\n")
 
 
@@ -25,17 +22,12 @@ def strip_markers(text):
 
 
 def _hash_position(text):
-    """Stable position in [0, 1) for a string, fixed across processes and runs.
-
-    blake2b rather than hash(): str hashing is salted per process unless PYTHONHASHSEED is
-    set, so hash() would move a train/test boundary on every run.
-    """
+    """Stable position in [0, 1) for a string. blake2b, because hash() is salted per process."""
     digest = hashlib.blake2b((text or "").encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") / 2**64
 
 
-# The python subset ships as 59 parquet shards, and the count is baked into the filenames
-# ("train-00000-of-00059.parquet"), so naming a subset of them means hardcoding the total.
+# The shard count is baked into the filenames, so naming a subset means hardcoding it
 PYTHON_SHARDS = 59
 
 
@@ -53,11 +45,8 @@ def get_dataset_pretrain(config):
 
     num_shards = ds_config.get("num_shards")
     if num_shards is not None:
-        # Download only the shards the step budget needs — whole shards, because a row slice
-        # would come after load_dataset had already fetched everything. This assumes the
-        # corpus was shuffled before sharding: shard 0 holds 165,528 repos across 218,079
-        # rows with only one adjacent pair sharing a repo, which is consistent with that,
-        # but it has not been checked across shards.
+        # Download only the shards the step budget needs. Assumes the corpus was shuffled
+        # before sharding, which shard 0 is consistent with but has not been checked.
         logging.info(f"pretrain: loading {num_shards} of {PYTHON_SHARDS} shards")
         ds = hf_datasets.load_dataset(
             "bigcode/starcoderdata", data_files=_shard_files(num_shards), split="train"
@@ -67,21 +56,15 @@ def get_dataset_pretrain(config):
             "bigcode/starcoderdata", data_dir="python", split="train", streaming=False
         )
 
-    # Cap the row count for the toy configs. An index slice is fine here in a way it is not
-    # for the train/test split below: this is "give me a small sample of the corpus", not a
-    # held-out set, and the repo hash split still runs on whatever it returns.
+    # Cap the row count for the toy configs
     sample_size = ds_config.get("sample_size")
     if sample_size is not None:
         ds = ds.select(range(min(sample_size, len(ds))))
         logging.info(f"pretrain: capped at {len(ds)} files")
 
-    # Split on a hash of the repo, not on row index. Rows arrive shuffled corpus-wide (only
-    # 1 in 218k consecutive pairs shares a repo), so an index cut sprays each repo's files
-    # across both sides: taking the first 0.1% of rows left 36.7% of test files in a repo
-    # that also appears in train, and the shared imports, helpers and licence headers that
-    # follow flatter the validation loss. Files per repo vary (82% of repos contribute one,
-    # the largest contributes 143), so the realised test fraction only approximates the
-    # configured ratio.
+    # Split on a hash of the repo, not on row index: rows are shuffled corpus-wide, so an
+    # index cut puts files from the same repo on both sides and flatters validation loss.
+    # The realised test fraction only approximates the configured ratio.
     ratio = ds_config["test_split_ratio"]
 
     def is_test(batch):
@@ -122,11 +105,8 @@ def _synth_records(ds_config, seed, with_trace):
 def _split_on_source(rows, ratio):
     """Partition synth rows on the generated function, not the row.
 
-    generate() emits several input variants per function, and one function can appear as
-    both an output-prediction and an input-prediction task, so splitting per row would put
-    the same function on both sides — the leak the repo-level split fixes for StarCoder.
-    Plain lists rather than hf_datasets.Dataset: an `args` field holds a mix of ints and
-    lists, which arrow cannot type, and regenerating is cheap and deterministic given seed.
+    A function appears with several inputs and under several tasks, so a per-row split
+    would leak. Plain lists: `args` mixes ints and lists, which arrow cannot type.
     """
     return {
         "test": [row for row in rows if _hash_position(row["source"]) < ratio],
@@ -160,17 +140,10 @@ def _sft_rows(config):
 
 
 def get_dataset_rl(config):
-    """Prompts only, plus the fields synth's checkers need to score a rollout.
-
-    The trace is part of the completion, not the prompt, so generation runs untraced here:
-    the reward comes from executing the function against the model's answer.
-    """
+    """Prompts only, plus the fields synth's checkers need to score a rollout."""
     ds_config = config["data"]["rl"]
 
-    # A seed of its own, so these are not the functions sft trained on. A model that has
-    # been shown a function's answers can score on recall, and a reward for recall teaches
-    # nothing about computing the result. Two streams can still write the same small
-    # function by chance; that is rare enough to leave alone.
+    # A seed of its own, so these are not the functions sft trained on
     rows = []
     for record in _synth_records(ds_config, config["seed"] + 1, with_trace=False):
         for task in ds_config["tasks"]:
@@ -191,10 +164,8 @@ def get_dataset_rl(config):
 def get_dataset_sft(config):
     """Prompt/completion rows from the synth generator, one per (record, task).
 
-    An arrow dataset, so it can be mapped and filtered without ever being resident. Rows
-    carry `is_test` rather than being partitioned here: prepare_sft applies the split
-    after tokenising, which keeps this a single generation pass — the expensive half,
-    since every generated function is executed under a tracer to produce its trace.
+    Rows carry `is_test` rather than being split here: prepare_sft splits after tokenising,
+    which keeps the expensive traced generation to a single pass.
     """
     return hf_datasets.Dataset.from_generator(_sft_rows, gen_kwargs={"config": config})
 
@@ -202,10 +173,7 @@ def get_dataset_sft(config):
 def _tokenise_sft_batch(batch, tokenizer, max_length):
     """Map one batch of prompt/completion rows to model-ready sequences.
 
-    A batched map rather than a hand-rolled chunk loop: arrow feeds fixed-size batches in
-    and writes results straight back out, so nothing accumulates and there is no sentinel
-    or boundary condition to get wrong. Returning fewer rows than it was given is how an
-    over-long task is dropped.
+    Returning fewer rows than it was given is how an over-long task is dropped.
     """
     bos_id, eos_id = tokenizer.bos_token_id, tokenizer.eos_token_id
     prompts = tokenizer(batch["prompt"], add_special_tokens=False)["input_ids"]
@@ -216,15 +184,15 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
     out = {k: [] for k in ("ids", "prompt_len", "length", "unscored") + carried}
     for i, (prompt, completion) in enumerate(zip(prompts, completions)):
         ids = [bos_id] + prompt + completion + [eos_id]
-        # One token longer than the context, since the input/target shift consumes one.
-        # Truncating would cut the answer off the end, so an over-long task is dropped.
+        # One over the context, for the input/target shift. Over-long tasks are dropped:
+        # truncating would cut off the answer.
         if len(ids) > max_length + 1:
             continue
         out["ids"].append(ids)
         out["prompt_len"].append(1 + len(prompt))
         out["length"].append(len(ids) - 1)
-        # Positions in `ids` of every token touching a span the task leaves unscored. A
-        # typed array, so a batch where no row has any still writes an integer column.
+        # Positions in `ids` of tokens touching an unscored span. A typed array, so a batch
+        # with none still writes an integer column.
         spans = _TASK_UNSCORED.get(batch["task"][i], lambda completion: [])(batch["completion"][i])
         out["unscored"].append(
             np.array(
@@ -244,15 +212,9 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
 def prepare_sft(ds_raw, tokenizer, config):
     """Tokenise prompt/completion pairs into single sequences with a mask boundary.
 
-    `prompt_len` is where the completion starts in `ids`. The collate shift makes
-    output_ids = ids[1:], so the first completion target sits at output_ids[prompt_len - 1]
-    and everything before it is masked. `length` is the model input length, which the
-    length-bucketed sampler batches on.
-
-    Arrow in, arrow out, the same shape as prepare_pretrain. Rows stay memory-mapped
-    rather than resident: holding the corpus as Python token lists cost roughly 5KB a row
-    and capped it well below what the GPU could consume. They stay randomly indexable
-    too, which the length-bucketed sampler needs and a streaming dataset could not give.
+    `prompt_len` is where the completion starts in `ids`; targets before it are masked.
+    `length` is the model input length, which the sampler batches on. Rows stay
+    memory-mapped and randomly indexable.
     """
     max_length = config["model"]["max_length"]
 
@@ -264,9 +226,8 @@ def prepare_sft(ds_raw, tokenizer, config):
         fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
         desc="Tokenizing sft",
     )
-    # map() caches on a fingerprint that a change to _tokenise_sft_batch does not always
-    # move, and a cached result from before a column existed is served without it. The
-    # collate treats a missing `unscored` as nothing to mask, so this would train silently.
+    # map() can serve a cached result from before `unscored` existed, and the collate
+    # would treat the missing column as nothing to mask.
     if "unscored" not in prepared.column_names:
         raise RuntimeError(
             f"sft: stale tokenised cache without `unscored`: delete {prepared.cache_files}"
@@ -277,8 +238,7 @@ def prepare_sft(ds_raw, tokenizer, config):
             f"sft: dropped {dropped}/{len(ds_raw)} rows over max_length {max_length}"
         )
 
-    # Split here rather than at generation: partitioning one pass into two collections
-    # means buffering one of them, which an arrow filter does not.
+    # Split here rather than at generation, so nothing has to be buffered
     return {
         "test": prepared.filter(lambda b: b["is_test"], batched=True),
         "train": prepared.filter(lambda b: [not v for v in b["is_test"]], batched=True),
@@ -286,12 +246,9 @@ def prepare_sft(ds_raw, tokenizer, config):
 
 
 def prepare_rl(ds_raw, tokenizer, config):
-    """Annotate rollout prompts with their token length.
+    """Annotate rollout prompts with their token length, for length-bucketed batching.
 
-    The prompt stays text: generate_texts tokenises and left-pads it itself. Only the length
-    is added here, so prompts of similar size batch together and left-padding — and so
-    wasted rollout compute — stays small. The reward fields ride along untouched, since
-    scoring a rollout means executing the function that produced the prompt.
+    The prompt stays text, and the reward fields ride along untouched.
     """
     max_length = config["model"]["max_length"]
     prepared = {}
@@ -301,9 +258,7 @@ def prepare_rl(ds_raw, tokenizer, config):
         kept, dropped = [], 0
         for row, prompt in zip(rows, encoded["input_ids"]):
             length = 1 + len(prompt)  # +1 for the <bos> generate_texts prepends
-            # A prompt that fills the context leaves nothing to generate. How much headroom
-            # a rollout actually needs is an RL-loop decision, so only the impossible cases
-            # are dropped here.
+            # A prompt that fills the context leaves nothing to generate
             if length >= max_length:
                 dropped += 1
                 continue
@@ -317,15 +272,12 @@ def prepare_rl(ds_raw, tokenizer, config):
 
 
 def _tokenize_and_chunk_batch(batch, tokenizer, max_length):
-    """Tokenise, join with <eos> separators, and cut fixed blocks — all in one pass.
+    """Tokenise, join with <eos> separators, and cut fixed blocks in one pass.
 
-    One map rather than two: the intermediate variable-length token lists are a full copy of
-    the corpus on disk (~128GB at 16B tokens), and nothing reads them except the chunking
-    step. Blocks are packed across file boundaries, so no token is spent on padding; the
-    remainder of each map batch, under one block, is dropped (0.002% of tokens measured).
+    Blocks are packed across file boundaries, so nothing is spent on padding. The remainder
+    of each map batch, under one block, is dropped.
     """
-    # +1 token per chunk so the input/target shift in collate still leaves
-    # max_length tokens for the model to see.
+    # +1 token per block, for the input/target shift in collate
     block = max_length + 1
     eos_id = tokenizer.eos_token_id
     cleaned = [strip_markers(text) for text in batch["content"]]
@@ -350,9 +302,7 @@ class TokenizedDataset(Dataset):
 def _check_token_budget(n_blocks, config):
     """Report whether the loaded shards cover the configured step budget.
 
-    Undersizing does not raise: InfiniteRandomSampler reshuffles and loops, so training
-    quietly begins a second pass over the same blocks — which contradicts the single-pass
-    assumption behind dropout: 0.0.
+    Undersizing does not raise: the sampler loops, so training quietly repeats data.
     """
     train_config = config["train"]["pretrain"]
     needed = (
@@ -376,10 +326,7 @@ def _check_token_budget(n_blocks, config):
 def prepare_pretrain(ds_raw, tokenizer, config):
     max_length = config["model"]["max_length"]
 
-    # int32, not the int64 arrow infers from Python ints. A 32000-token vocabulary needs 15
-    # bits, so the extra four bytes per token buy nothing and cost ~64GB over the corpus.
-    # This is a storage win only: with_format("torch") materialises the list column through
-    # Python and hands back int64 tensors either way.
+    # int32 rather than the int64 arrow infers: halves storage for a 32000-token vocabulary
     features = hf_datasets.Features({"ids": hf_datasets.Sequence(hf_datasets.Value("int32"))})
 
     prepared = {}

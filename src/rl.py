@@ -7,24 +7,20 @@ import time
 from src import train, generation, synth
 from src.dataloader import resume_at_minibatch
 
-# Which checker scores a rollout, keyed the way data.get_dataset_rl labels the row. Mirrors
-# data._TASK_FORMATTERS, which built the prompt from the same record: the task decides both
-# what was asked and what counts as having answered it.
+# Which checker scores a rollout, keyed by the row's task (mirrors data._TASK_FORMATTERS).
 _TASK_CHECKERS = {
     "output": synth.check_output_answer,
     "input": synth.check_input_answer,
     "search": synth.check_input_answer,
 }
 
-# Tasks whose training reward is graded rather than the checker's verdict. The checker
-# stays what validation reports, so a pass rate means the same thing under any reward.
+# Tasks trained on a graded reward. Validation still reports the checker's verdict.
 _TASK_REWARDS = {
     "search": synth.reward_search_answer,
 }
 
 
-# Per-rollout figures a task reports at validation beside its pass rate, averaged over
-# the greedy rollouts and logged under their own names.
+# Extra per-rollout figures a task reports at validation, averaged over greedy rollouts.
 _TASK_STATS = {
     "search": synth.search_stats,
 }
@@ -57,18 +53,11 @@ def validation_step(
 ):
     """Score the test prompts two ways: sampled reward and greedy pass@1.
 
-    `sampled_reward` is the fraction of `samples_per_prompt` rollouts per prompt, drawn at
-    the training temperature, that the checker accepts. It is the quantity the policy
-    gradient actually raises, so it is the one that shows whether RL is working: an update
-    that lifts a right answer from 0.2 to 0.35 is real progress, but greedy decoding still
-    picks a wrong one held at 0.4, and pass@1 does not move until the right one overtakes.
+    `sampled_reward` is what the policy gradient raises directly, so it moves first.
+    `pass_rate` is the number that matters in the end, and lags it.
 
-    `pass_rate` is greedy pass@1, the model's single best guess — the number that matters
-    in the end, and one that lags the sampled reward.
-
-    Sampling runs under a fixed seed, restored afterwards so training's own draws are left
-    alone. Every validation then sees the same random stream on the same prompts, so a
-    change between steps is the weights moving rather than a luckier draw.
+    Sampling runs under a fixed seed, restored afterwards, so validations are comparable
+    and training's own draws are left alone.
     """
     sampled, passed, finished_count, total = 0.0, 0.0, 0, 0
     stats = {}
@@ -116,19 +105,12 @@ def validation_step(
 def token_budget_chunks(starts, ends, budget):
     """Split rows into chunks whose padded size, rows x width, fits `budget` tokens.
 
-    `starts` and `ends` are each row's first real column and one past its last, so a
-    chunk's width is the span from its earliest start to its latest end — what remains
-    once the columns that are padding for every row in it are trimmed.
+    `starts` and `ends` are each row's first real column and one past its last. Rollout
+    lengths are only known after generation, so this cannot live in the sampler.
 
-    A rollout's length is not known until it has been generated, so this cannot live in
-    the sampler the way SFT's token budget does. One completion that runs to its limit
-    pads everything generated beside it out to that length, and the activations held for
-    backward scale with exactly that padded size.
-
-    Rows are taken in order of `ends`, so short rollouts share a chunk and are not padded
-    out to a long one. A row wider than the budget on its own still gets a chunk: it
-    cannot be split, and dropping it would bias the update towards short completions.
-    `budget` None means one chunk.
+    Rows are taken in order of `ends`, so short rollouts share a chunk. A row wider than
+    the budget still gets its own chunk: dropping it would bias the update towards short
+    completions. `budget` None means one chunk.
     """
     order = sorted(range(len(ends)), key=ends.__getitem__)
     if budget is None:
@@ -150,11 +132,8 @@ def token_budget_chunks(starts, ends, budget):
 def pool_rollouts(minibatches, pad_token_id):
     """Join the rollouts of several generation minibatches into one set of tensors.
 
-    Each minibatch is (token_ids, completion_mask, old_logprobs, seq_starts, advantages) and
-    was decoded to its own length, so the narrower ones are padded on the right out to the
-    widest. That is the side generation already pads a finished row on, so a pooled row
-    reads exactly as one that stopped early in a longer minibatch: `seq_starts` still
-    points at its first real column and the columns added are chosen by nobody.
+    Each minibatch is (token_ids, completion_mask, old_logprobs, seq_starts, advantages).
+    Narrower ones are right-padded to the widest, the side generation already pads on.
     """
     width = max(token_ids.shape[1] for token_ids, *_ in minibatches)
     fills = (pad_token_id, False, 0.0)
@@ -186,16 +165,11 @@ def policy_gradient_backward(
 ):
     """Rescore rollouts with gradients on and backpropagate the policy-gradient loss.
 
-    Per rollout the loss is -(advantage x mean logprob of its own tokens), plus the
-    router's load-balancing term. What is backpropagated is the sum over the rollouts given,
-    times `loss_scale`, so the caller decides what the gradient is averaged over.
-    The sum is accumulated over chunks that each fit `minibatch_token_size`, which changes
-    the peak memory and not the gradient. Advantages arrive already computed, so a group
-    can be split across chunks freely.
+    Per rollout the loss is -(advantage x mean logprob of its own tokens), plus the router's
+    load-balancing term. The sum over rollouts, times `loss_scale`, is backpropagated in
+    chunks that fit `minibatch_token_size`, which changes peak memory and not the gradient.
 
-    Returns (loss_pg_sum, loss_aux_sum, logprob_gap_sum, completion_tokens) as floats: the
-    two losses summed over rollouts and unscaled, the gap summed over completion tokens
-    against the logprobs recorded at sampling.
+    Returns (loss_pg_sum, loss_aux_sum, logprob_gap_sum, completion_tokens) as floats.
     """
     device = token_ids.device
     length = token_ids.shape[1]
@@ -216,11 +190,8 @@ def policy_gradient_backward(
         chosen = completion_mask[rows, left:right]
         chunk_starts = seq_starts[rows] - left
 
-        # seq_starts gives the left-padded rows the same context generation saw;
-        # padding_mask keeps pad out of the MoE's expert seats. Position t predicts token
-        # t+1, so the positions worth projecting are the ones whose next token the model
-        # chose. output_mask restricts the vocabulary projection to those: the prompt and
-        # padding columns of a (rows, seq, vocab) logits tensor are never read.
+        # seq_starts and padding_mask reproduce the context generation saw. output_mask
+        # projects only the positions whose next token the model chose.
         predicts_completion = F.pad(chosen[:, 1:], (0, 1), value=False)
         with amp.autocast(device_type=device.type):
             logits, loss_aux = model(
@@ -230,13 +201,8 @@ def policy_gradient_backward(
                 output_mask=predicts_completion,
             )  # (completion tokens, vocab), row-major
 
-        # fp32, for the reason generate samples in it. Divided by the temperature because
-        # generate was: the rewards describe the policy as it was sampled, so that is the
-        # distribution whose logprobs the gradient needs. Scoring the untempered one against
-        # tempered samples is not the gradient of the expected reward, and it reads as a
-        # logprob gap that is not a bug. The ids sampling blocks are removed here too, for
-        # the same reason: with them left in, the rescore spreads probability over tokens
-        # the sampler could not draw.
+        # fp32, tempered and with the blocked ids removed, exactly as generate sampled:
+        # the gradient needs the logprobs of the distribution the rollouts were drawn from.
         step_logits = logits.float() / temperature
         step_logits[:, blocked] = -float("inf")
         # Boolean indexing is row-major on both sides, so these line up with the logits
@@ -244,8 +210,7 @@ def policy_gradient_backward(
         new_logprobs = -F.cross_entropy(step_logits, targets, reduction="none")  # (tokens,)
 
         # Mean over each rollout's own tokens, so a long completion does not outweigh a
-        # short one with the same advantage. Negated: minimising this raises the logprob of
-        # rollouts that beat their group. Summed, not averaged: see the docstring.
+        # short one. Summed over rollouts, not averaged: the caller scales.
         row_of_token = predicts_completion.nonzero()[:, 0]
         tokens_per_row = predicts_completion.sum(-1)
         per_seq = torch.zeros(len(chunk), device=device).index_add_(0, row_of_token, new_logprobs)
@@ -270,9 +235,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
 
     train_config = config["train"][stage]
     device = torch.device(train_config["device"])
-    # A step is defined in prompts. generation_prompts_size only sets how many of them are
-    # generated together, and a ragged last minibatch would leave the step short of the
-    # count its gradient is scaled by.
+    # A step is defined in prompts; generation_prompts_size only batches their generation
     if train_config["effective_prompts_size"] % train_config["generation_prompts_size"] != 0:
         raise ValueError(
             f"effective_prompts_size ({train_config['effective_prompts_size']}) must be a "
@@ -321,8 +284,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         results.append(result)
         model.train()
 
-    # The untrained starting point, so a run's own log holds what its later validations
-    # are compared against. Only on a fresh start: a resumed run already recorded it.
+    # Record the starting point on a fresh run, for later validations to compare against
     if step_no == 0 and not any(r["type"] == "validation" for r in results):
         validate()
 
@@ -337,7 +299,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     total_completion_tokens = 0
     total_rescored_tokens = 0
     trained_groups = 0
-    # The step's rollouts from groups worth training on, held until all of it is generated
+    # Rollouts from mixed groups, held until the whole step is generated
     pending = []
     resume_at_minibatch(dataloaders["train"], step_no * minibatches_per_step)
     optimiser.zero_grad(set_to_none=True)
@@ -345,45 +307,33 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     model.train()
     for minibatch_idx, batch in enumerate(dataloaders["train"]):
 
-        # One row per rollout, each prompt's group contiguous so the reshape below lines
-        # every group up with the prompt that produced it. Interleaving instead would take
-        # each group statistic across different prompts, with no error to show for it.
+        # One row per rollout, each prompt's group contiguous for the reshape below
         rows = [row for row in batch for _ in range(completions_per_prompt)]
         prompts = [row["prompt"] for row in rows]
 
-        # Sample the rollouts. No gradient comes back from here: generate runs under
-        # no_grad, so its logprobs are a record of the sampling policy, not something to
-        # differentiate.
+        # Sample the rollouts, under no_grad
         token_ids, completion_mask, old_logprobs, seq_starts, finished = generation.generate(
             model, tokenizer, prompts, device, max_new_tokens, temperature
         )
 
-        # The whole row travels with the rollout rather than just its answer: scoring means
-        # executing the record that produced the prompt, and the checkers read result,
-        # source and args straight off it.
+        # Scoring executes the record that produced the prompt, so the whole row is passed
         completions = generation.decode_rollouts(tokenizer, token_ids)
         rewards = torch.tensor(reward(rows, completions), dtype=torch.float32, device=device)
         rewards = rewards.reshape(len(batch), completions_per_prompt)
         solved = sum(score(rows, completions)) / len(rows)
 
-        # Group-relative advantage. The floor matters once rewards are graded: dividing by
-        # the group's own spread makes every mixed group count the same, so one whose
-        # rollouts differ by a hundredth would be trained on as hard as one split between
-        # right and wrong. Below the floor the advantage shrinks with the spread instead.
+        # Group-relative advantage. The floor stops a group whose graded rewards barely
+        # differ from being normalised up to a full-size advantage.
         mean = rewards.mean(dim=-1, keepdim=True)
         sd = rewards.std(dim=-1, keepdim=True)
         advantages = ((rewards - mean) / sd.clamp(min=advantage_sd_floor)).reshape(-1)
 
-        # A group whose rollouts all scored the same has zero advantage everywhere, so its
-        # policy gradient is exactly zero. Those rollouts are dropped here rather than
-        # rescored: the forward and backward they would cost buys nothing, and counting
-        # them in the average shrinks the gradient by however many there happened to be.
+        # A uniform group has zero advantage and so zero gradient: drop it rather than
+        # rescore it, and keep it out of the average.
         mixed = sd.squeeze(-1) > 0  # (prompts,)
         keep = mixed.repeat_interleave(completions_per_prompt).nonzero().squeeze(-1)
 
-        # Held for the step's one rescore rather than trained on here. Ids, a mask and
-        # logprobs cost next to nothing to keep, and the weights do not move until the step
-        # is complete, so nothing is lost by waiting.
+        # Held for the step's one rescore
         if len(keep) > 0:
             pending.append(
                 (
@@ -396,7 +346,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
             )
             trained_groups += int(mixed.sum().item())
 
-        # Over every group, dropped or not: these describe what the policy produced
+        # Over every group, dropped or not
         total_reward += rewards.mean().item() / minibatches_per_step
         total_solved += solved / minibatches_per_step
         total_finished += finished.float().mean().item() / minibatches_per_step
@@ -407,12 +357,9 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         if (minibatch_idx + 1) % minibatches_per_step != 0:
             continue
 
-        # Rescore with gradients on and backpropagate, in chunks that fit the token budget.
-        # The chunks are cut from the whole step's rollouts, so how the prompts were split
-        # for generation decides neither how many backward passes there are nor how full
-        # each one is. The mean is over the rollouts trained on. A step where no group was
-        # mixed has nothing to apply and leaves the weights alone, but still counts, so the
-        # step number keeps tracking the sampler's position.
+        # Rescore and backpropagate the whole step's rollouts, in chunks that fit the token
+        # budget, averaged over the rollouts trained on. A step with no mixed group leaves
+        # the weights alone but still counts, so step_no tracks the sampler's position.
         trained_rollouts = trained_groups * completions_per_prompt
         if trained_rollouts > 0:
             total_loss_pg, total_loss_aux, total_logprob_gap, total_rescored_tokens = (
@@ -449,14 +396,12 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         # Losses and the gap are over the rollouts trained on; the rest over all of them
         result["loss_pg"] = total_loss_pg / max(trained_rollouts, 1)
         result["loss_aux"] = total_loss_aux / max(trained_rollouts, 1)
-        # The logprob gap is the rescore against the sampling pass on the same tokens: it
-        # should sit near zero, and drifting from it means generation and training no
-        # longer compute the same policy (padding, routing, precision).
         result["reward"] = total_reward
         result["solved_rate"] = total_solved
         result["finished_rate"] = total_finished
         result["mixed_group_rate"] = total_mixed_groups
         result["trained_groups"] = trained_groups
+        # Rescore against the sampling pass on the same tokens: should sit near zero
         result["logprob_gap"] = total_logprob_gap / max(total_rescored_tokens, 1)
         result["grad_norm"] = grad_norm
         results.append(result)
@@ -495,7 +440,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         if step_no >= num_steps:
             break
 
-    # A final save when num_steps is not a multiple of checkpoint_steps, as in train.train_loop
+    # A final save when num_steps is not a multiple of checkpoint_steps
     if step_no % checkpoint_steps != 0:
         train.save_checkpoint(
             model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
@@ -505,9 +450,5 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
 
 
 def train_rl(stage, model, dataloaders, tokenizer, config, init_from=None):
-    """Run the RL stage: train.train's bookkeeping, this module's loop.
-
-    Kept as a wrapper rather than folded into train.train so that module stays free of RL
-    specifics, and rather than moved into it so scripts/rl.py reads like scripts/sft.py.
-    """
+    """Run the RL stage: train.train's bookkeeping, this module's loop."""
     return train.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)

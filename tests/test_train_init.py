@@ -135,9 +135,7 @@ def _run_loop(cfg, make_model, tokenizer):
 
 
 def test_final_step_is_checkpointed_when_it_is_not_a_multiple(tmp_path, make_model, tokenizer):
-    """num_steps need not divide by checkpoint_steps. Without a save on exit the steps
-    since the last checkpoint are lost, and so are their metrics — save_checkpoint is also
-    what writes results.json."""
+    """The steps after the last checkpoint are saved on exit, with their results."""
     cfg = _loop_config(tmp_path, num_steps=3, checkpoint_steps=2)
     run_path = _run_loop(cfg, make_model, tokenizer)
 
@@ -147,12 +145,7 @@ def test_final_step_is_checkpointed_when_it_is_not_a_multiple(tmp_path, make_mod
 def test_a_run_ending_on_a_boundary_is_not_checkpointed_twice(
     tmp_path, make_model, tokenizer, monkeypatch
 ):
-    """The in-loop save already covers the final step; saving again rewrites the same file.
-
-    Counting calls rather than reading the directory, because a duplicate save lands on the
-    same "<step>.pt" filename — the checkpoints on disk look identical either way, and only
-    the wasted write distinguishes them.
-    """
+    """A run ending on a checkpoint boundary saves that step once, counted by calls."""
     saved_steps = []
     real_save = train.save_checkpoint
 
@@ -184,12 +177,7 @@ def test_final_checkpoint_carries_the_results_for_its_steps(tmp_path, make_model
 
 
 def test_zero_step_stage_saves_the_untrained_model(tmp_path, make_model, tokenizer):
-    """num_steps 0 writes step 0 rather than returning empty-handed.
-
-    It is how a config builds a tokenizer without pretraining: the stage runs, saves the
-    untrained weights, and the next stage initialises from them through the normal path
-    instead of needing a branch for "there is no checkpoint".
-    """
+    """num_steps 0 writes step 0, so the next stage has weights to initialise from."""
     model = make_model(len(tokenizer)).float()
     cfg = _loop_config(tmp_path, num_steps=0, checkpoint_steps=100)
     cfg["train"]["pretrain"] = cfg["train"]["sft"]
