@@ -48,8 +48,13 @@ def _mass_on(model, tokenizer, ids):
     return sum(masses) / len(masses)
 
 
-def _run(model, tokenizer, tmp_path, monkeypatch, checker, num_steps, temperature=1.0, max_new_tokens=1):
+def _run(
+    model, tokenizer, tmp_path, monkeypatch, checker, num_steps, temperature=1.0, max_new_tokens=1,
+    reward=None, **overrides,
+):
     monkeypatch.setitem(rl._TASK_CHECKERS, "fake", checker)
+    if reward is not None:
+        monkeypatch.setitem(rl._TASK_REWARDS, "fake", reward)
 
     train_config = {
         "device": DEV,
@@ -57,9 +62,9 @@ def _run(model, tokenizer, tmp_path, monkeypatch, checker, num_steps, temperatur
         "adam_betas": [0.9, 0.95],
         "adam_eps": 1e-8,
         "warm_up_steps": 1,
-        "minibatch_prompts_size": 2,
+        "generation_prompts_size": 2,
         "effective_prompts_size": 4,
-        "rollouts_per_group": 16,
+        "completions_per_prompt": 16,
         "num_steps": num_steps,
         "checkpoint_steps": 1000,
         "validation_steps": 1000,
@@ -69,6 +74,7 @@ def _run(model, tokenizer, tmp_path, monkeypatch, checker, num_steps, temperatur
         # _mass_on reads
         "max_new_tokens": max_new_tokens,
         "temperature": temperature,
+        **overrides,
     }
     config = {"seed": 0, "model": {"max_length": 64}, "train": {"rl": train_config}}
 
@@ -161,6 +167,52 @@ def test_only_mixed_groups_are_trained_on(fresh_model, tokenizer, tmp_path, monk
     assert all(r["mixed_group_rate"] == pytest.approx(r["trained_groups"] / 4) for r in results)
 
 
+def test_a_graded_reward_trains_while_the_checker_still_reports_success(
+    fresh_model, tokenizer, tmp_path, monkeypatch
+):
+    """A task's graded reward is what the gradient follows; its checker is what is reported.
+
+    Here nothing ever passes the checker, so a loop that trained on the score would find
+    every group uniform and train on none.
+    """
+    results = _run(
+        fresh_model, tokenizer, tmp_path, monkeypatch, lambda row, c: False, num_steps=2,
+        reward=lambda row, c: 0.5 * _space_led(row, c),
+    )
+    train_results = _train(results)
+
+    assert all(r["trained_groups"] > 0 and r["grad_norm"] > 0 for r in train_results)
+    assert all(0 < r["reward"] < 0.5 for r in train_results)
+    assert all(r["solved_rate"] == 0 for r in train_results)
+    assert all(r["pass_rate"] == 0 for r in results if r["type"] == "validation")
+
+
+def test_advantage_sd_floor_shrinks_the_update_from_a_narrow_group(
+    fresh_model, tokenizer, tmp_path, monkeypatch
+):
+    """Without a floor a group split by 0.01 is normalised up to a full-size advantage.
+
+    The same rollouts under the same seed, so the two gradients differ only by the floor:
+    the spread of a 0-or-0.01 reward is at most about 0.005, a hundredth of a floor of 0.5.
+    The bound asserted is looser than that because the router's aux gradient rides along
+    with the policy gradient and does not scale with the advantage.
+    """
+    narrow = lambda row, c: 0.01 * _space_led(row, c)
+    state = {k: v.clone() for k, v in fresh_model.state_dict().items()}
+
+    norms = []
+    for overrides in ({}, {"advantage_sd_floor": 0.5}):
+        fresh_model.load_state_dict(state)
+        torch.manual_seed(0)
+        results = _run(
+            fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1,
+            reward=narrow, **overrides,
+        )
+        norms.append(_train(results)[0]["grad_norm"])
+
+    assert 0 < norms[1] < norms[0] / 10
+
+
 def test_a_fresh_run_records_its_starting_point(fresh_model, tokenizer, tmp_path, monkeypatch):
     results = _run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1)
 
@@ -206,7 +258,7 @@ def test_sampled_validation_is_reproducible_and_leaves_training_rng(fresh_model,
         {"prompt": p, "task": "fake", "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"])}
         for p in PROMPTS
     ]
-    config = {"seed": 0, "train": {"rl": {"minibatch_prompts_size": 2}}}
+    config = {"seed": 0, "train": {"rl": {"generation_prompts_size": 2}}}
     loader = create_dataloaders_rl({"test": rows}, tokenizer, config)["test"]
 
     def validate():
@@ -289,3 +341,54 @@ def test_chunked_rescore_gives_the_single_pass_gradient(fresh_model, tokenizer):
     assert chunked_stats[0] == pytest.approx(whole_stats[0], rel=0.02, abs=1e-4)
     assert chunked_stats[3] == whole_stats[3]
     assert chunked_stats[2] / chunked_stats[3] < 1e-3
+
+
+def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, tokenizer):
+    """A step's rollouts are rescored together, whatever minibatches they were generated in.
+
+    The two minibatches decode to different widths, so pooling has to pad one of them, and
+    a row that came out shifted or scored against the wrong advantage would move the sum.
+    """
+    from src import generation
+
+    torch.manual_seed(0)
+    minibatches = []
+    for prompts, max_new_tokens in ((["hello", "foo bar baz"], 4), (["the quick brown fox jumps over"], 12)):
+        prompts = [p for p in prompts for _ in range(4)]
+        token_ids, completion_mask, old_logprobs, seq_starts, _ = generation.generate(
+            fresh_model, tokenizer, prompts, DEV, max_new_tokens=max_new_tokens, temperature=1.0
+        )
+        advantages = torch.randn(len(prompts), device=DEV)
+        minibatches.append((token_ids, completion_mask, old_logprobs, seq_starts, advantages))
+    assert minibatches[0][0].shape[1] != minibatches[1][0].shape[1]
+    blocked = generation.blocked_token_ids(tokenizer, torch.device(DEV))
+    fresh_model.train()
+
+    def grads(groups):
+        fresh_model.zero_grad(set_to_none=True)
+        stats = [
+            rl.policy_gradient_backward(
+                fresh_model, tokenizer, torch.amp.GradScaler(enabled=False), *group, blocked, 1.0, 0.01, 1.0,
+            )
+            for group in groups
+        ]
+        flat = torch.cat([p.grad.flatten() for p in fresh_model.parameters() if p.grad is not None])
+        return flat, [sum(column) for column in zip(*stats)]
+
+    separate, separate_stats = grads(minibatches)
+    pooled, pooled_stats = grads([rl.pool_rollouts(minibatches, tokenizer.pad_token_id)])
+    assert separate.norm() > 0
+
+    assert torch.nn.functional.cosine_similarity(separate, pooled, dim=0) > 0.999
+    assert pooled.norm().item() == pytest.approx(separate.norm().item(), rel=0.02)
+    assert pooled_stats[0] == pytest.approx(separate_stats[0], rel=0.02, abs=1e-4)
+    assert pooled_stats[3] == separate_stats[3]
+    assert pooled_stats[2] / pooled_stats[3] < 1e-3
+
+
+def test_a_step_that_is_not_whole_minibatches_is_refused(fresh_model, tokenizer, tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="multiple of generation_prompts_size"):
+        _run(
+            fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1,
+            generation_prompts_size=3,
+        )

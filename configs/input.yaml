@@ -55,12 +55,12 @@ train:
 
   rl:
     # Untuned; the same values as sft_only's rl stage, so the two runs differ in the task
-    minibatch_prompts_size: 4      # x rollouts_per_group = 32 rows generated together
-    effective_prompts_size: 64     # 16 accumulation steps, 512 rollouts generated per
+    generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together
+    effective_prompts_size: 64     # 16 generation minibatches, 512 rollouts generated per
                                    # update; only groups whose rollouts disagree are
                                    # trained on
-    rollouts_per_group: 8
-    rescore_token_size: 2048       # padded tokens per rescore-and-backward
+    completions_per_prompt: 8
+    minibatch_token_size: 2048     # padded tokens per rescore-and-backward
     learning_rate: 1.0e-5
     lr_schedule: constant
     adam_betas: [0.9, 0.95]

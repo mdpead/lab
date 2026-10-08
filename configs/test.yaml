@@ -66,10 +66,10 @@ train:
                                     # sft run, which is right — different ancestor.
 
   rl:
-    minibatch_prompts_size: 4
+    generation_prompts_size: 4
     effective_prompts_size: 8
-    rollouts_per_group: 8
-    rescore_token_size: 2048        # padded tokens per rescore-and-backward. Rollout
+    completions_per_prompt: 8
+    minibatch_token_size: 2048      # padded tokens per rescore-and-backward. Rollout
                                     # lengths are only known after sampling, so rows are
                                     # split to fit rather than batched to fit. 32 rows x
                                     # 256 here, so this exercises the split.
@@ -98,10 +98,10 @@ train:
                                     # steps matter as much as early ones
     validation_steps: 20
     validation_prompts_size: 8      # prompts per validation batch; no gradients are held,
-                                    # so it can exceed minibatch_prompts_size
+                                    # so it can exceed generation_prompts_size
     validation_batches: 1           # in batches of validation_prompts_size
     validation_samples: 8           # rollouts per test prompt for sampled_reward, at the
-                                    # training temperature. Defaults to rollouts_per_group.
+                                    # training temperature. Defaults to completions_per_prompt.
     compile_model: false            # generation changes sequence length every decode step,
                                     # which fullgraph=True cannot hold across.
                                     # No num_workers or prefetch_factor: both exist to

@@ -1,5 +1,6 @@
 import ast
 import random
+import re
 import sys
 
 # Values stay small on purpose: the task should be hard because tracing control flow is
@@ -198,6 +199,22 @@ def _run_traced(source, code_obj, func, args, max_executed):
     return result, steps, len(steps)
 
 
+# The longest run any tier allows. Tracing outside generate() has a source and arguments
+# but no tier to read a cap from, and only needs the run to be bounded.
+_MAX_EXECUTED = max(cfg["max_executed"] for cfg in TIERS.values())
+
+
+def _trace_call(source, args):
+    """Trace f(*args) for a function given as source. _run_traced's result, or None."""
+    namespace = {}
+    try:
+        exec(compile(source, "<synth>", "exec"), namespace)
+        func = namespace["f"]
+        return _run_traced(source, func.__code__, func, args, _MAX_EXECUTED)
+    except Exception:
+        return None
+
+
 def generate(n, tier="medium", seed=0, inputs_per_fn=4, with_trace=True):
     """Yield n records, sharing each generated function across several sampled inputs."""
     # The distinctness filter below compares results across a function's inputs, so with
@@ -291,6 +308,109 @@ def format_input_task(record, include_trace):
     return prompt, f"{body}{ANSWER_OPEN}{answer}{ANSWER_CLOSE}"
 
 
+# Opens each attempt in the search task's thinking. Plain text rather than a reserved
+# token: it only has to be told apart from a line of the function, and no statement the
+# generator writes starts with it.
+TRY_PREFIX = "try "
+# Missed guesses shown before the one that works, at most. The count varies per example so
+# that stopping follows from the attempt reaching the target, not from how many came before.
+MAX_MISSES = 2
+
+
+def _args_repr(args):
+    return ", ".join(repr(a) for a in args)
+
+
+def _format_attempt(args, steps, result):
+    """One guess as the search task writes it: the arguments, their trace, what came back."""
+    lines = [f"{TRY_PREFIX}{_args_repr(args)}", *steps[:-1], f"{steps[-1]}  ->  {result!r}"]
+    return "\n".join(lines)
+
+
+def _matches(result, target):
+    """Fraction of the returned values that equal the target's."""
+    if not (isinstance(result, tuple) and isinstance(target, tuple) and len(result) == len(target)):
+        return float(result == target)
+    return sum(r == t for r, t in zip(result, target)) / max(len(target), 1)
+
+
+def _perturb(rng, args):
+    """Arguments near `args`: at least one changed, each by a small step."""
+    out = [list(a) if isinstance(a, list) else a for a in args]
+    for i in rng.sample(range(len(out)), k=rng.randint(1, len(out))):
+        delta = rng.choice([-3, -2, -1, 1, 2, 3])
+        if isinstance(out[i], list):
+            out[i][rng.randrange(len(out[i]))] += delta
+        else:
+            out[i] += delta
+    return out
+
+
+def _sample_misses(rng, record, n):
+    """Up to n distinct argument sets near the record's own that do not reach its result.
+
+    Fewer when the function leaves little room to miss: an argument that is overwritten
+    can be changed freely and the result still comes out right.
+    """
+    misses, seen = [], {repr(record["args"])}
+    for _ in range(n * 8):
+        if len(misses) == n:
+            break
+        args = _perturb(rng, record["args"])
+        if repr(args) in seen:
+            continue
+        seen.add(repr(args))
+        outcome = _trace_call(record["source"], args)
+        if outcome is None or outcome[0] == record["result"]:
+            continue
+        misses.append((args, outcome[1], outcome[0]))
+    # Worst first, so each guess shown is no further from the target than the one before
+    return sorted(misses, key=lambda m: _matches(m[2], record["result"]))
+
+
+def format_search_task(record, include_trace):
+    """Input prediction with room to search: guess arguments, trace them, try again.
+
+    format_input_task traces forwards from arguments the model must already have chosen,
+    so finding them has to happen before anything is written. Here the thinking is a run
+    of attempts, each one a guess, its trace and the value it returns, ending on the first
+    that returns the target. Every line is still forward execution; what is new is choosing
+    the next guess with the last miss in view.
+
+    The misses are drawn from a generator seeded by the record, so the same record always
+    formats the same way. They are there to be read, not imitated: see miss_argument_spans.
+    """
+    prompt, completion = format_input_task(record, False)
+    if not include_trace:
+        return prompt, completion
+
+    rng = random.Random(f"{record['source']}|{record['args']!r}")
+    attempts = _sample_misses(rng, record, rng.randint(0, MAX_MISSES))
+    attempts.append((record["args"], record["trace"].split("\n"), record["result"]))
+    body = "\n".join(_format_attempt(*attempt) for attempt in attempts)
+    return prompt, f"{THINK_OPEN}{body}{THINK_CLOSE}{completion}"
+
+
+_TRY_LINE = re.compile(
+    rf"(?:(?<=\n)|(?<={re.escape(THINK_OPEN)})){re.escape(TRY_PREFIX)}(.*)"
+)
+
+
+def miss_argument_spans(completion):
+    """Character spans of the arguments each missed attempt in a search completion tries.
+
+    These are what sft must not be scored on. A miss is in the data so the model learns to
+    trace a guess, see it fall short and go on; trained to predict the missed arguments
+    themselves, it learns to open with a wrong guess, and did: two thirds of examples
+    start with a miss, and first attempts came out right 28% of the time against 49% for
+    the input task's single guess. With these left out, every guess the model is trained
+    to make is one that reaches the target.
+
+    Every attempt but the last is a miss, which is how format_search_task builds them.
+    """
+    return [match.span(1) for match in _TRY_LINE.finditer(completion)][:-1]
+
+
 def extract_answer(completion):
     """Pull the answer text from a rollout, or None if the model never reached one."""
     if ANSWER_OPEN not in completion:
@@ -312,24 +432,130 @@ def check_output_answer(record, completion):
         return False
 
 
-def check_input_answer(record, completion):
-    """Reward any arguments reaching the target, not just the ones used to build the task.
+_NO_RESULT = object()
+
+
+def _answered_args(completion):
+    """The arguments a rollout answered with, as a tuple, or None if it gave none that parse."""
+    answer = extract_answer(completion)
+    if answer is None:
+        return None
+    try:
+        return ast.literal_eval(f"({answer},)")
+    except (ValueError, SyntaxError):
+        return None
+
+
+def _answer_result(record, completion):
+    """What the record's function returns for the arguments answered, or _NO_RESULT.
 
     literal_eval parses literals only and never executes, so the model's answer cannot run
     code — the only thing executed is the generator's own function, called with the parsed
     values.
     """
-    answer = extract_answer(completion)
-    if answer is None:
-        return False
-    try:
-        args = ast.literal_eval(f"({answer},)")
-    except (ValueError, SyntaxError):
-        return False
+    args = _answered_args(completion)
+    if args is None:
+        return _NO_RESULT
 
     namespace = {}
     exec(compile(record["source"], "<synth>", "exec"), namespace)
     try:
-        return namespace["f"](*args) == record["result"]
+        return namespace["f"](*args)
     except Exception:
+        return _NO_RESULT
+
+
+def check_input_answer(record, completion):
+    """Accept any arguments reaching the target, not just the ones used to build the task."""
+    return _answer_result(record, completion) == record["result"]
+
+
+def extract_attempts(completion):
+    """The attempts in a search rollout's thinking, each as the text the model wrote for it."""
+    if THINK_OPEN not in completion:
+        return []
+    body = completion.split(THINK_OPEN, 1)[1].split(THINK_CLOSE)[0].split(ANSWER_OPEN)[0]
+    attempts = []
+    for line in body.strip().split("\n"):
+        if line.startswith(TRY_PREFIX):
+            attempts.append([line])
+        elif attempts:
+            attempts[-1].append(line)
+    return ["\n".join(lines) for lines in attempts]
+
+
+def _attempt_args(attempt):
+    try:
+        return ast.literal_eval(f"({attempt.split(chr(10))[0][len(TRY_PREFIX):]},)")
+    except (ValueError, SyntaxError):
+        return None
+
+
+def _is_faithful(record, attempt):
+    """Whether an attempt is what the function really does with the arguments it tries.
+
+    Compared as text against the formatter's own rendering, so a wrong value, a skipped
+    line and a misreported return all fail the same way. Arguments the tracer rejects —
+    a run that raises or leaves the value range — cannot be written faithfully at all.
+    """
+    args = _attempt_args(attempt)
+    outcome = _trace_call(record["source"], args) if args is not None else None
+    if outcome is None:
         return False
+    result, steps, _ = outcome
+    return attempt.strip() == _format_attempt(args, steps, result)
+
+
+def search_stats(record, completion):
+    """How a search rollout went, beyond whether its answer was right.
+
+    A pass rate alone cannot tell a model that guesses better from one that guesses more:
+    with room for several attempts, more tries lift it on their own. `first_try_solved` is
+    whether the first attempt's arguments reach the target, checked by running them, and
+    is the figure that only better guessing moves.
+    """
+    attempts = extract_attempts(completion)
+    first = _attempt_args(attempts[0]) if attempts else None
+    outcome = _trace_call(record["source"], first) if first is not None else None
+    return {
+        "attempts": len(attempts),
+        "first_try_solved": float(outcome is not None and outcome[0] == record["result"]),
+        "faithful": sum(_is_faithful(record, a) for a in attempts) / max(len(attempts), 1),
+    }
+
+
+# Reward terms beside the 1.0 for a correct answer. Small against it on purpose: they are
+# there to rank rollouts the answer alone leaves tied, not to compete with getting it right.
+REWARD_MATCH = 0.25  # a wrong answer, scaled by the fraction of returned values it got
+REWARD_FAITHFUL = 0.25  # scaled by the fraction of attempts traced as the function runs
+ATTEMPT_COST = 0.02  # per attempt after the first
+
+
+def reward_search_answer(record, completion):
+    """Graded reward for the search task. check_input_answer stays the measure of success.
+
+    A correct-or-not reward says nothing about the thinking, and a model can then write a
+    trace that matches neither the function nor its answer. Everything here is still
+    decided by running the function:
+
+    - 1.0 for arguments that reach the target, else REWARD_MATCH for each returned value
+      they do get, in proportion.
+    - REWARD_FAITHFUL for attempts whose trace is the real one. The last attempt counts
+      only if the answer repeats its arguments, so the answer has to come from the search.
+    - ATTEMPT_COST off for each attempt after the first, so a better first guess beats a
+      longer search and guessing until the budget runs out is not free.
+    """
+    result = _answer_result(record, completion)
+    if result == record["result"]:
+        reward = 1.0
+    else:
+        reward = REWARD_MATCH * _matches(result, record["result"])
+
+    attempts = extract_attempts(completion)
+    if attempts:
+        faithful = [_is_faithful(record, attempt) for attempt in attempts]
+        if _attempt_args(attempts[-1]) != _answered_args(completion):
+            faithful[-1] = False
+        reward += REWARD_FAITHFUL * sum(faithful) / len(attempts)
+        reward -= ATTEMPT_COST * (len(attempts) - 1)
+    return reward

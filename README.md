@@ -223,7 +223,7 @@ Details that matter in practice:
 
 - **The gradient pass scores exactly what was sampled.** It uses the same temperature and excludes the same tokens the sampler cannot emit. The difference between the two passes is logged every step as `logprob_gap` and has stayed at or below 0.0005 per token on real runs.
 - **Prompts with no signal are dropped after sampling.** A group whose rollouts all scored the same has zero advantage, so it is not put through the gradient pass, and the update is averaged over the groups that were.
-- **Memory is bounded by tokens.** A rollout's length is only known after it is generated, so the rows are split after sampling to fit a token budget, and gradients are accumulated across the pieces. The result matches the single-pass gradient.
+- **Memory is bounded by tokens.** A rollout's length is only known after it is generated, so a step's rollouts are all generated first and then split to fit a token budget, with gradients accumulated across the pieces. How many prompts are generated together is a separate setting that affects speed only. The result matches the single-pass gradient.
 - **Validation reports two numbers** on a fixed test set: `sampled_reward`, the quantity RL directly optimises, drawn under a fixed seed so runs are comparable; and greedy `pass_rate`, which is what matters in the end and lags behind.
 - **`mixed_group_rate` is logged every step.** It is the share of prompts whose rollouts disagreed, and the first thing to look at when a run is flat.
 
@@ -249,7 +249,9 @@ Everything is driven by the YAML files in `configs/`. Each value there carries a
 
 Pretraining downloads part of StarCoder from Hugging Face, which needs an account that has accepted the dataset's terms.
 
-The `input` configuration starts from the `sft_only` model instead of running its own pretraining. Its run directory has to be seeded by hand first; the three commands are in the comment at the top of `configs/input.yaml`.
+The `input` and `search` configurations start from the `sft_only` model instead of running their own pretraining. Each run directory has to be seeded by hand first; the three commands are in the comment at the top of `configs/input.yaml` and `configs/search.yaml`.
+
+The `search` configuration is the format the input-prediction results point to: the model guesses arguments, traces them, compares the result with the target and tries again, with a graded RL reward that also checks each trace against real execution. It has not been run yet.
 
 ### Tests
 
@@ -273,7 +275,7 @@ A few of the problems found along the way, kept here because they were more inst
 ## Layout
 
 ```
-configs/        YAML configs: test (tiny), base (16 GB card), sft_only, input
+configs/        YAML configs: test (tiny), base (16 GB card), sft_only, input, search
 scripts/        One entry point per stage
 src/
   model.py        Transformer, GQA, RoPE, mixture of experts

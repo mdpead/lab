@@ -183,7 +183,7 @@ def collate_rl_batch(batch):
 
 
 def collate_sft_batch(batch, pad_token_id):
-    """Pad to the batch maximum and mask the prompt out of the targets.
+    """Pad to the batch maximum and mask the prompt, and any unscored spans, out of the targets.
 
     Rows are variable length here, unlike pretrain's fixed blocks, so padding is per batch
     rather than absent. Prompt positions are overwritten in output_ids only: the model
@@ -202,8 +202,12 @@ def collate_sft_batch(batch, pad_token_id):
 
     # The shift puts the first completion target at prompt_len - 1; everything before it
     # is prompt. Trailing pad positions already hold pad_token_id and need no masking.
+    # A task can also leave parts of its completion unscored (data._TASK_UNSCORED), by
+    # position in `ids`; the target for position p sits at p - 1, as above.
     for i, row in enumerate(batch):
         output_ids[i, : row["prompt_len"] - 1] = pad_token_id
+        for position in row.get("unscored", ()):
+            output_ids[i, position - 1] = pad_token_id
 
     return {
         "input_ids": input_ids,
@@ -308,17 +312,16 @@ def create_dataloaders_rl(
         if split == "train":
             batching = {
                 "batch_sampler": PromptSampler(
-                    ds[split], train_config["minibatch_prompts_size"], config["seed"]
+                    ds[split], train_config["generation_prompts_size"], config["seed"]
                 )
             }
         else:
             # One bounded pass in dataset order: a pass-rate is only comparable across
             # steps if every measurement runs on the same prompts, and an infinite
             # sampler here would make `for batch in loader` hang instead. Its own size,
-            # because validation holds no gradients: the training minibatch is sized for
-            # the rescore's activations, and decoding at that size leaves the GPU idle.
+            # so validation can decode more rows at once than training chooses to.
             batch_size = train_config.get(
-                "validation_prompts_size", train_config["minibatch_prompts_size"]
+                "validation_prompts_size", train_config["generation_prompts_size"]
             )
             batching = {"batch_size": batch_size, "shuffle": False}
 

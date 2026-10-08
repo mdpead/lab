@@ -94,15 +94,15 @@ train:
     # hand-picked prompts took sampled reward from 30% to 88%. The loop learns when a
     # prompt's rollouts disagree, and whether they do depends on the SFT model, so watch
     # mixed_group_rate before reading anything into a flat curve.
-    minibatch_prompts_size: 4      # x rollouts_per_group = 32 rows generated together.
+    generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together.
                                    # Sized for generation, which holds no gradients; the
                                    # rescore is bounded separately below.
-    effective_prompts_size: 64     # 16 accumulation steps, 512 rollouts generated per update.
+    effective_prompts_size: 64     # 16 generation minibatches, 512 rollouts generated per update.
                                    # Only groups whose rollouts disagree are trained on —
                                    # about a fifth on a model that is mostly right — so the
                                    # count is sized for what survives, not what is sampled.
-    rollouts_per_group: 8
-    rescore_token_size: 4096       # padded tokens per rescore-and-backward, the same
+    completions_per_prompt: 8
+    minibatch_token_size: 4096     # padded tokens per rescore-and-backward, the same
                                    # budget as sft's minibatch_token_size and the same
                                    # memory per token. A rollout's length is not known
                                    # until it is generated, so the cap is applied after
@@ -127,7 +127,7 @@ train:
     keep_checkpoints: 2
     warm_up_steps: 10
     validation_steps: 25
-    validation_prompts_size: 32    # no gradients held, so larger than the training minibatch
+    validation_prompts_size: 32    # prompts per validation batch, set apart from training's
     validation_batches: 13         # in batches of validation_prompts_size: the whole
                                    # ~400-prompt test split
     validation_samples: 2          # rollouts per test prompt for sampled_reward. Fewer

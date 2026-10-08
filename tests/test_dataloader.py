@@ -66,7 +66,7 @@ def config():
                 "num_workers": 2,
                 "prefetch_factor": 2,
             },
-            "rl": {"minibatch_prompts_size": PROMPTS_PER_STEP},
+            "rl": {"generation_prompts_size": PROMPTS_PER_STEP},
         },
     }
 

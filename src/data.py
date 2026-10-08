@@ -4,6 +4,7 @@ import logging
 import re
 
 import datasets as hf_datasets
+import numpy as np
 from torch.utils.data import Dataset
 
 from src import synth
@@ -98,6 +99,13 @@ def get_dataset_pretrain(config):
 _TASK_FORMATTERS = {
     "output": synth.format_output_task,
     "input": synth.format_input_task,
+    "search": synth.format_search_task,
+}
+
+
+# Parts of a task's completion that sft reads but is not scored on, as character spans.
+_TASK_UNSCORED = {
+    "search": synth.miss_argument_spans,
 }
 
 
@@ -201,10 +209,11 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
     """
     bos_id, eos_id = tokenizer.bos_token_id, tokenizer.eos_token_id
     prompts = tokenizer(batch["prompt"], add_special_tokens=False)["input_ids"]
-    completions = tokenizer(batch["completion"], add_special_tokens=False)["input_ids"]
+    encoded = tokenizer(batch["completion"], add_special_tokens=False, return_offsets_mapping=True)
+    completions = encoded["input_ids"]
 
     carried = ("task", "source", "n_executed", "is_test")
-    out = {k: [] for k in ("ids", "prompt_len", "length") + carried}
+    out = {k: [] for k in ("ids", "prompt_len", "length", "unscored") + carried}
     for i, (prompt, completion) in enumerate(zip(prompts, completions)):
         ids = [bos_id] + prompt + completion + [eos_id]
         # One token longer than the context, since the input/target shift consumes one.
@@ -214,6 +223,19 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
         out["ids"].append(ids)
         out["prompt_len"].append(1 + len(prompt))
         out["length"].append(len(ids) - 1)
+        # Positions in `ids` of every token touching a span the task leaves unscored. A
+        # typed array, so a batch where no row has any still writes an integer column.
+        spans = _TASK_UNSCORED.get(batch["task"][i], lambda completion: [])(batch["completion"][i])
+        out["unscored"].append(
+            np.array(
+                [
+                    1 + len(prompt) + j
+                    for j, (start, end) in enumerate(encoded["offset_mapping"][i])
+                    if any(start < hi and end > lo for lo, hi in spans)
+                ],
+                dtype=np.int32,
+            )
+        )
         for key in carried:
             out[key].append(batch[key][i])
     return out
@@ -242,6 +264,13 @@ def prepare_sft(ds_raw, tokenizer, config):
         fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
         desc="Tokenizing sft",
     )
+    # map() caches on a fingerprint that a change to _tokenise_sft_batch does not always
+    # move, and a cached result from before a column existed is served without it. The
+    # collate treats a missing `unscored` as nothing to mask, so this would train silently.
+    if "unscored" not in prepared.column_names:
+        raise RuntimeError(
+            f"sft: stale tokenised cache without `unscored`: delete {prepared.cache_files}"
+        )
     dropped = len(ds_raw) - len(prepared)
     if dropped:
         logging.warning(

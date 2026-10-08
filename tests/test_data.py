@@ -26,7 +26,7 @@ def _no_arrow_cache():
     datasets.enable_caching()
 
 
-def _config(tokenizer, num_records, max_length=512, ratio=0.1):
+def _config(tokenizer, num_records, max_length=512, ratio=0.1, tasks=("output",)):
     return {
         "seed": 0,
         "model": {"max_length": max_length},
@@ -34,7 +34,7 @@ def _config(tokenizer, num_records, max_length=512, ratio=0.1):
             "sft": {
                 "num_records": num_records,
                 "tier": "easy",
-                "tasks": ["output"],
+                "tasks": list(tasks),
                 "inputs_per_fn": 4,
                 "with_trace": True,
                 "test_split_ratio": ratio,
@@ -151,3 +151,64 @@ def test_rl_prompts_are_not_the_sft_functions(tokenizer):
     # Chance collisions between the two streams are allowed; sharing a stream is not
     assert len(rl_sources() & sft_sources) < 0.05 * len(rl_sources())
     assert rl_sources() == rl_sources(), "rl data is not deterministic"
+
+
+def _lossless_tokenizer():
+    """One token per byte, so decoding gives back what was encoded and no token straddles
+    the edge of a span.
+
+    The shared fixture maps characters it never saw to <unk>, digits among them, which is
+    fine for shapes and lengths but not for reading targets back as text. With merges, a
+    token such as " -" would sit half inside a miss's arguments and be left out whole,
+    which is right for training and makes the expected text depend on the vocabulary.
+    """
+    from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
+    from transformers import PreTrainedTokenizerFast
+
+    tok = Tokenizer(models.BPE())
+    tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tok.decoder = decoders.ByteLevel()
+    tok.train_from_iterator(
+        [""],
+        trainers.BpeTrainer(
+            vocab_size=0,
+            initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
+            special_tokens=["<bos>", "<eos>", "<pad>", "<|think|>", "<|/think|>", "<|answer|>", "<|/answer|>"],
+        ),
+    )
+    return PreTrainedTokenizerFast(
+        tokenizer_object=tok, bos_token="<bos>", eos_token="<eos>", pad_token="<pad>"
+    )
+
+
+def test_search_rows_leave_exactly_the_missed_guesses_unscored():
+    """The collated targets, read back as text, are the completion with each miss's
+    arguments gone and everything else — its trace, the final guess, the answer — kept.
+
+    Checked through the collate rather than on the stored positions, since an off-by-one
+    between `ids` and the shifted targets would blank the neighbouring token instead.
+    """
+    from src import synth
+
+    tokenizer = _lossless_tokenizer()
+    cfg, ds = _prepared(tokenizer, 60, max_length=2048, tasks=("search",))
+    pad = tokenizer.pad_token_id
+    rows = [ds["train"][i] for i in range(len(ds["train"]))]
+    assert any(len(row["unscored"]) for row in rows) and any(not len(row["unscored"]) for row in rows)
+
+    for row in rows:
+        targets = dataloader.collate_sft_batch([row], pad)["output_ids"][0]
+        completion = tokenizer.decode(row["ids"][row["prompt_len"] : -1])
+        expected = completion
+        for lo, hi in reversed(synth.miss_argument_spans(completion)):
+            expected = expected[:lo] + expected[hi:]
+        scored = tokenizer.decode([t for t in targets.tolist()[:-1] if t != pad])
+        assert scored == expected
+
+
+def test_tasks_with_nothing_unscored_still_write_the_column(tokenizer):
+    """Every row of an output-only dataset has an empty list, which arrow would otherwise
+    type as null and then refuse to concatenate with a dataset that has positions."""
+    _, ds = _prepared(tokenizer, 20)
+    assert all(len(row["unscored"]) == 0 for row in ds["train"])
+    assert "int" in str(ds["train"].features["unscored"])
