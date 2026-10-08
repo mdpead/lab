@@ -6,6 +6,12 @@ import triton.language as tl
 from torch import Tensor
 
 
+def _length_bucket(length):
+    """The next power of two at or above `length`: what autotune keys a sequence length on.
+    """
+    return 1 << (length - 1).bit_length()
+
+
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE_Q_SEQ": 32, "BLOCK_SIZE_KV_SEQ": 32}, num_warps=4, num_stages=4),
@@ -21,7 +27,8 @@ from torch import Tensor
             {"BLOCK_SIZE_Q_SEQ": 128, "BLOCK_SIZE_KV_SEQ": 128}, num_warps=8, num_stages=3
         ),
     ],
-    key=["BATCHES", "Q_HEADS", "KV_HEADS", "Q_SEQS", "KV_SEQS", "HEAD_DIMS", "causal"],
+    key=["Q_HEADS", "KV_HEADS", "HEAD_DIMS", "causal", "Q_BUCKET", "KV_BUCKET"],
+    cache_results=True,
 )
 @triton.jit
 def flash_attention_forward_kernel(
@@ -36,8 +43,10 @@ def flash_attention_forward_kernel(
     Q_HEADS: tl.constexpr,
     KV_HEADS: tl.constexpr,
     Q_SEQS,
-    KV_SEQS,  # >= Q_SEQS with a kv cache; queries are the last Q_SEQS positions
+    KV_SEQS,
     HEAD_DIMS: tl.constexpr,
+    Q_BUCKET,
+    KV_BUCKET,
     stride_qb,
     stride_qh,
     stride_qs,
@@ -230,6 +239,8 @@ def flash_attention_forward(
         Q_SEQS,
         KV_SEQS,
         HEAD_DIMS,
+        _length_bucket(Q_SEQS),
+        _length_bucket(KV_SEQS),
         stride_qb,
         stride_qh,
         stride_qs,
@@ -262,7 +273,8 @@ def flash_attention_forward(
         triton.Config({"BLOCK_SIZE_Q_SEQ": 128}, num_warps=4, num_stages=2),
         triton.Config({"BLOCK_SIZE_Q_SEQ": 256}, num_warps=8, num_stages=2),
     ],
-    key=["BATCHES", "Q_HEADS", "SEQS", "HEAD_DIMS"],
+    key=["Q_HEADS", "HEAD_DIMS", "SEQ_BUCKET"],
+    cache_results=True,
 )
 @triton.jit
 def flash_attention_backward_kernel_d(
@@ -273,6 +285,7 @@ def flash_attention_backward_kernel_d(
     Q_HEADS,  # Unused in the body, kept so autotune re-tunes when the head count changes
     SEQS,
     HEAD_DIMS: tl.constexpr,
+    SEQ_BUCKET,
     stride_ob,
     stride_oh,
     stride_os,
@@ -352,7 +365,8 @@ def flash_attention_backward_kernel_d(
             {"BLOCK_SIZE_Q_SEQ": 128, "BLOCK_SIZE_KV_SEQ": 128}, num_warps=8, num_stages=3
         ),
     ],
-    key=["BATCHES", "Q_HEADS", "KV_HEADS", "SEQS", "HEAD_DIMS", "causal"],
+    key=["Q_HEADS", "KV_HEADS", "HEAD_DIMS", "causal", "SEQ_BUCKET"],
+    cache_results=True,
 )
 @triton.jit
 def flash_attention_backward_kernel_dq(
@@ -370,6 +384,7 @@ def flash_attention_backward_kernel_dq(
     KV_HEADS: tl.constexpr,
     SEQS,
     HEAD_DIMS: tl.constexpr,
+    SEQ_BUCKET,
     stride_qb,
     stride_qh,
     stride_qs,
@@ -555,7 +570,8 @@ def flash_attention_backward_kernel_dq(
             {"BLOCK_SIZE_Q_SEQ": 128, "BLOCK_SIZE_KV_SEQ": 128}, num_warps=8, num_stages=3
         ),
     ],
-    key=["BATCHES", "Q_HEADS", "KV_HEADS", "SEQS", "HEAD_DIMS", "causal"],
+    key=["Q_HEADS", "KV_HEADS", "HEAD_DIMS", "causal", "SEQ_BUCKET"],
+    cache_results=True,
 )
 @triton.jit
 def flash_attention_backward_kernel_dkdv(
@@ -574,6 +590,7 @@ def flash_attention_backward_kernel_dkdv(
     KV_HEADS: tl.constexpr,
     SEQS,
     HEAD_DIMS: tl.constexpr,
+    SEQ_BUCKET,
     stride_qb,
     stride_qh,
     stride_qs,
@@ -817,6 +834,7 @@ def flash_attention_backward(
         Q_HEADS,
         SEQS,
         HEAD_DIMS,
+        _length_bucket(SEQS),
         stride_ob,
         stride_oh,
         stride_os,
@@ -847,6 +865,7 @@ def flash_attention_backward(
         KV_HEADS,
         SEQS,
         HEAD_DIMS,
+        _length_bucket(SEQS),
         stride_qb,
         stride_qh,
         stride_qs,
@@ -894,6 +913,7 @@ def flash_attention_backward(
         KV_HEADS,
         SEQS,
         HEAD_DIMS,
+        _length_bucket(SEQS),
         stride_qb,
         stride_qh,
         stride_qs,
