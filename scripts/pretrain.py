@@ -10,10 +10,10 @@ def main():
     config = utils.parse_config()
     utils.init_run(config, "pretrain")
 
-    ds_raw = data.get_dataset_pretrain(config)
+    # scripts/tokenizer.py trained the tokenizer; this only loads it
+    token = tokenizer.load_tokenizer(utils.get_run_path(config))
 
-    # Trains the BPE on first run and loads it after, so the raw dataset must exist first
-    token = tokenizer.get_tokenizer(ds_raw, config)
+    ds_raw = data.get_dataset_pretrain(config)
 
     ds = data.prepare_pretrain(ds_raw, token, config)
 

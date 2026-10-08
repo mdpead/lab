@@ -442,25 +442,12 @@ def train(stage, model, dataloaders, tokenizer, config, init_from=None, loop=Non
     """Run a stage. `init_from` is another stage's directory, whose weights seed the first run.
 
     `loop` is the per-stage training loop, defaulting to this module's, so stages share the
-    resume, zero-step and already-complete handling here. The order of those checks matters.
+    resume and already-complete handling here.
     """
 
     train_config = config["train"][stage]
     run_path = utils.get_stage_path(config, stage)
     run = get_run(run_path, model, train_config, tokenizer, init_from)
-
-    # A zero step budget still writes step 0, so a later stage has weights to start from.
-    # Checked before the already-complete branch, which a zero budget would satisfy.
-    if train_config["num_steps"] == 0:
-        if checkpoint_steps_on_disk(f"{run_path}/checkpoints"):
-            logging.info(f"{stage}: num_steps is 0 and a checkpoint already exists")
-            return None
-        save_checkpoint(
-            model, run["optimiser"], run["lr_scheduler"], run["scaler"],
-            run_path, 0, run["results"], train_config.get("keep_checkpoints"),
-        )
-        logging.info(f"{stage}: num_steps is 0 — saved the untrained model as step 0")
-        return None
 
     if run["step_no"] >= train_config["num_steps"]:
         logging.info("Training already complete.")

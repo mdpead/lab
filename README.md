@@ -234,12 +234,14 @@ Requires Linux, an NVIDIA GPU with CUDA, and Python 3.13. Developed on an RTX 50
 ```bash
 pip install -r requirements.txt
 
-# Smoke test: a tiny model through all three stages
+# Smoke test: a tiny model through every stage
+python -m scripts.tokenizer --config test
 python -m scripts.pretrain --config test
 python -m scripts.sft --config test
 python -m scripts.rl --config test
 
 # Full size
+python -m scripts.tokenizer --config base
 python -m scripts.pretrain --config base
 python -m scripts.sft --config base
 python -m scripts.rl --config base
@@ -247,7 +249,9 @@ python -m scripts.rl --config base
 
 Everything is driven by the YAML files in `configs/`. Each value there carries a comment explaining why it is what it is. Outputs go to `models/<config name>/<stage>/`: checkpoints, a `results.json` with every training and validation record, a log, and a snapshot of the config.
 
-Pretraining downloads part of StarCoder from Hugging Face, which needs an account that has accepted the dataset's terms.
+The tokenizer and pretraining stages download part of StarCoder from Hugging Face, which needs an account that has accepted the dataset's terms.
+
+The tokenizer is its own stage, so a configuration can skip pretraining. `sft_only` has no pretrain stage: run `scripts.tokenizer`, then `scripts.sft`, which trains from random init because the config sets no `train.sft.init_from_step`.
 
 The `input` and `search` configurations start from the `sft_only` model instead of running their own pretraining. Each run directory has to be seeded by hand first; the three commands are in the comment at the top of `configs/input.yaml` and `configs/search.yaml`.
 

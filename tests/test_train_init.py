@@ -6,7 +6,7 @@ import os
 import pytest
 import torch
 
-from src import train, utils
+from src import tokenizer as tokenizer_module, train, utils
 
 DEV = "cuda"
 
@@ -173,55 +173,6 @@ def test_final_checkpoint_carries_the_results_for_its_steps(tmp_path, make_model
     assert [e["step_no"] for e in results if e["type"] == "train"] == [1, 2, 3]
 
 
-# --- zero-step stages ---
-
-
-def test_zero_step_stage_saves_the_untrained_model(tmp_path, make_model, tokenizer):
-    """num_steps 0 writes step 0, so the next stage has weights to initialise from."""
-    model = make_model(len(tokenizer)).float()
-    cfg = _loop_config(tmp_path, num_steps=0, checkpoint_steps=100)
-    cfg["train"]["pretrain"] = cfg["train"]["sft"]
-    run_path = utils.get_stage_path(cfg, "pretrain")
-
-    train.train("pretrain", model, {}, tokenizer, cfg)
-
-    assert train.checkpoint_steps_on_disk(f"{run_path}/checkpoints") == [0]
-
-
-def test_zero_step_stage_is_idempotent(tmp_path, make_model, tokenizer):
-    """Re-running must not overwrite a checkpoint that already exists."""
-    model = make_model(len(tokenizer)).float()
-    cfg = _loop_config(tmp_path, num_steps=0, checkpoint_steps=100)
-    cfg["train"]["pretrain"] = cfg["train"]["sft"]
-    run_path = utils.get_stage_path(cfg, "pretrain")
-
-    train.train("pretrain", model, {}, tokenizer, cfg)
-    first = os.path.getmtime(f"{run_path}/checkpoints/0.pt")
-    train.train("pretrain", model, {}, tokenizer, cfg)
-
-    assert os.path.getmtime(f"{run_path}/checkpoints/0.pt") == first
-
-
-def test_a_later_stage_initialises_from_the_zero_step_checkpoint(
-    tmp_path, make_model, tokenizer
-):
-    """The point of writing step 0: sft starts from it with no special case."""
-    source = make_model(len(tokenizer)).float()
-    cfg = _loop_config(tmp_path, num_steps=0, checkpoint_steps=100)
-    cfg["train"]["pretrain"] = cfg["train"]["sft"]
-    train.train("pretrain", source, {}, tokenizer, cfg)
-
-    target = make_model(len(tokenizer)).float()
-    with torch.no_grad():                      # make the two differ before loading
-        next(target.parameters()).add_(1.0)
-    assert not torch.equal(_first_param(target), _first_param(source))
-
-    train.load_model_weights(
-        target, utils.get_stage_path(cfg, "pretrain"), torch.device(DEV), step=0
-    )
-    assert torch.equal(_first_param(target), _first_param(source))
-
-
 @pytest.mark.parametrize("schedule, decays", [("inverse_sqrt", True), ("constant", False)])
 def test_lr_schedule_is_chosen_by_config(make_model, tokenizer, schedule, decays):
     tc = {"device": DEV, "learning_rate": 1e-3, "adam_betas": [0.9, 0.95], "adam_eps": 1e-8,
@@ -235,3 +186,28 @@ def test_lr_schedule_is_chosen_by_config(make_model, tokenizer, schedule, decays
     assert lrs[0] < max(lrs), "warmup should ramp up"
     assert max(lrs) == pytest.approx(1e-3)
     assert (lrs[-1] < max(lrs)) == decays
+
+
+# --- the tokenizer stage ---
+
+
+def _run_config(tmp_path, vocab_size=100):
+    return {"name": "t", "seed": 0, "locations": {"models_dir": str(tmp_path)},
+            "tokenizer": {"vocab_size": vocab_size}}
+
+
+def test_loading_a_tokenizer_that_was_never_trained_says_how_to_train_it(tmp_path):
+    with pytest.raises(FileNotFoundError, match="scripts.tokenizer"):
+        tokenizer_module.load_tokenizer(str(tmp_path))
+
+
+def test_a_changed_tokenizer_config_clears_the_saved_tokenizer(tmp_path):
+    """Stages only load the tokenizer, so a stale one must not survive a config change."""
+    run_path = utils.init_run_dir(_run_config(tmp_path))
+    os.makedirs(f"{run_path}/tokenizer")
+
+    utils.init_run_dir(_run_config(tmp_path))
+    assert os.path.isdir(f"{run_path}/tokenizer")
+
+    utils.init_run_dir(_run_config(tmp_path, vocab_size=200))
+    assert not os.path.isdir(f"{run_path}/tokenizer")

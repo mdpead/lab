@@ -62,6 +62,10 @@ def save_tokenizer(tokenizer, dir):
 
 
 def load_tokenizer(dir):
+    if not os.path.isdir(f"{dir}/tokenizer"):
+        raise FileNotFoundError(
+            f"No tokenizer in {dir} — run `python -m scripts.tokenizer` for this config first."
+        )
     return PreTrainedTokenizerFast.from_pretrained(f"{dir}/tokenizer")
 
 

@@ -1,9 +1,10 @@
 name: sft_only
 seed: 0
 
-# Full-size model and StarCoder tokenizer, but no pretraining: train.pretrain runs zero
-# steps, which builds the vocabulary and writes the untrained weights as step 0 for sft.
-# Only the pretraining differs from a base run, which isolates what it contributes.
+# Full-size model and StarCoder tokenizer, but no pretraining: there is no pretrain stage,
+# and sft has no init_from_step, so it trains from random init. Run scripts.tokenizer, then
+# scripts.sft. Only the pretraining differs from a base run, which isolates what it
+# contributes.
 model:
   d_model: 1024
   num_heads: 16
@@ -18,26 +19,6 @@ model:
   dropout: 0.0
 
 train:
-  pretrain:
-    # Only num_steps matters here; the rest is read by train.train before it returns
-    num_steps: 0
-    effective_batch_token_size: 131072
-    minibatch_token_size: 4096
-    learning_rate: 7.0e-4
-    adam_betas: [0.9, 0.95]
-    adam_eps: 1.0e-8
-    label_smoothing: 0.0
-    router_aux_loss_coef: 0.01
-    device: cuda
-    checkpoint_steps: 5000
-    keep_checkpoints: 1        # only step 0 is ever written
-    warm_up_steps: 2000
-    validation_steps: 500
-    validation_batches: 3
-    compile_model: false
-    num_workers: 8
-    prefetch_factor: 4
-
   sft:
     effective_batch_token_size: 32768
     # 2048 rather than base's 4096: ragged batches fragmented the allocator at 4096 and
@@ -58,7 +39,6 @@ train:
     compile_model: false       # ragged batch widths; see base
     num_workers: 8
     prefetch_factor: 4
-    init_from_step: 0          # the untrained checkpoint the zero-step pretrain wrote
 
   rl:
     # Untuned, as in base
@@ -91,7 +71,7 @@ train:
 data:
   pretrain:
     test_split_ratio: 0.001
-    # Only the tokenizer consumes this corpus. sample_size caps what is then tokenised.
+    # The corpus the tokenizer is trained on. sample_size caps the files loaded.
     num_shards: 1
     sample_size: 60000
 

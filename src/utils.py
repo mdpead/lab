@@ -78,12 +78,11 @@ def _start_file_log(stage_path, stage, cleared):
     return log_path
 
 
-def init_run(config, stage):
-    """Prepare this stage's directory, clearing it if the config it depends on moved."""
+def init_run_dir(config):
+    """Prepare the run directory, clearing the tokenizer if its config moved."""
     set_seed(config["seed"])
     run_path = get_run_path(config)
-    stage_path = get_stage_path(config, stage)
-    os.makedirs(stage_path, exist_ok=True)
+    os.makedirs(run_path, exist_ok=True)
 
     # The tokenizer is loaded from disk whenever it exists, so a changed tokenizer config
     # needs its own check or it would be silently ignored.
@@ -93,6 +92,14 @@ def init_run(config, stage):
             logging.warning("Tokenizer config differs from saved config — clearing tokenizer.")
             shutil.rmtree(f"{run_path}/tokenizer", ignore_errors=True)
     save_config(run_path, config)
+    return run_path
+
+
+def init_run(config, stage):
+    """Prepare this stage's directory, clearing it if the config it depends on moved."""
+    init_run_dir(config)
+    stage_path = get_stage_path(config, stage)
+    os.makedirs(stage_path, exist_ok=True)
 
     cleared = False
     if os.path.exists(f"{stage_path}/config.json"):
