@@ -356,3 +356,13 @@ def test_a_step_that_is_not_whole_minibatches_is_refused(fresh_model, tokenizer,
             fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1,
             generation_prompts_size=3,
         )
+
+
+def test_reward_options_reach_the_graded_reward_and_not_a_plain_checker(monkeypatch):
+    monkeypatch.setitem(rl._TASK_CHECKERS, "plain", lambda row, c: True)
+    monkeypatch.setitem(rl._TASK_CHECKERS, "graded", lambda row, c: True)
+    monkeypatch.setitem(rl._TASK_REWARDS, "graded", lambda row, c, scale=1.0: 0.5 * scale)
+    rows = [{"task": "plain"}, {"task": "graded"}]
+
+    assert rl.reward(rows, ["", ""]) == [1.0, 0.5]
+    assert rl.reward(rows, ["", ""], {"scale": 0.5}) == [1.0, 0.25]

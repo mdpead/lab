@@ -194,6 +194,50 @@ def test_search_reward_credits_each_returned_value_a_wrong_answer_gets():
     assert synth.reward_search_answer(record, rollout("4, 6")) == 1.0
 
 
+def test_closest_credit_grades_a_wrong_answer_by_how_near_it_lands():
+    record = {"source": "def f(a, b):\n    b = (b + 1)\n    return a, b", "result": (4, 7)}
+    reward = lambda answer: synth.reward_search_answer(
+        record, f"{synth.ANSWER_OPEN}{answer}{synth.ANSWER_CLOSE}", partial_credit="closest"
+    )
+
+    # Each step towards the target is worth more, with no value yet exactly right
+    assert 0 < reward("40, 60") < reward("9, 20") < reward("5, 9") < reward("4, 5")
+    # However near, a miss stays under REWARD_MATCH and a hit is worth the full 1.0
+    assert reward("4, 5") < synth.REWARD_MATCH < reward("4, 6") == 1.0
+
+
+def test_closest_credit_never_falls_for_searching_on():
+    """Graded on the best guess, not the last, so a later guess that lands further away
+    costs only its attempt. Graded on the last, stopping after one guess scored better."""
+    far = "try 9, 9\na += b  ->  a = 18\nb = (a * 2)  ->  b = 36\nreturn a, b  ->  (18, 36)"
+    reward = lambda think, answer: synth.reward_search_answer(
+        _SEARCH_RECORD, _search_rollout(think, answer), partial_credit="closest"
+    )
+
+    stopped, searched_on = reward(_MISS, "1, 3"), reward(_MISS + "\n" + far, "9, 9")
+    assert searched_on == pytest.approx(stopped - synth.ATTEMPT_COST)
+    # Counted from running the guess, so a trace that misreports it changes nothing here
+    lied = far.replace("(18, 36)", "(5, 10)")
+    assert reward(_MISS + "\n" + lied, "9, 9") < searched_on
+
+
+def test_search_reward_refuses_an_unknown_partial_credit():
+    with pytest.raises(ValueError, match="partial_credit"):
+        synth.reward_search_answer(_SEARCH_RECORD, "", partial_credit="nearest")
+
+
+def test_closeness_is_one_only_for_the_target_itself():
+    assert synth._closeness((4, [1, 2]), (4, [1, 2])) == 1.0
+    assert synth._closeness(7, 7) == 1.0
+    assert synth._closeness((4, [1, 3]), (4, [1, 2])) < 1.0
+    # A list of the wrong length loses the elements it is missing or adds
+    assert synth._closeness([1, 2], [1, 2, 3]) == pytest.approx(2 / 3)
+    assert synth._closeness([1, 2, 3, 4], [1, 2]) == pytest.approx(1 / 2)
+    # Nothing comparable: a different type, a different arity, no result at all
+    assert synth._closeness("4", 4) == synth._closeness((4,), (4, 7)) == 0.0
+    assert synth._closeness(synth._NO_RESULT, (4, 7)) == 0.0
+
+
 @pytest.mark.parametrize(
     "completion",
     [
@@ -209,15 +253,45 @@ def test_search_reward_scores_malformed_rollouts_without_raising(completion):
     assert synth.reward_search_answer(_SEARCH_RECORD, completion) <= 0.0
 
 
-def test_search_stats_separate_a_first_try_hit_from_a_later_one():
-    stats = lambda think, answer: synth.search_stats(_SEARCH_RECORD, _search_rollout(think, answer))
+def _stats(think, answer, *keys):
+    stats = synth.search_stats(_SEARCH_RECORD, _search_rollout(think, answer))
+    return {key: stats[key] for key in keys}
 
-    assert stats(_HIT, "2, 3") == {"attempts": 1, "first_try_solved": 1.0, "faithful": 1.0}
-    assert stats(_MISS + "\n" + _HIT, "2, 3") == {"attempts": 2, "first_try_solved": 0.0, "faithful": 1.0}
+
+def test_search_stats_separate_a_first_try_hit_from_a_later_one():
+    keys = ("attempts", "first_try_solved", "faithful", "solved_later")
+
+    assert _stats(_HIT, "2, 3", *keys) == {
+        "attempts": 1, "first_try_solved": 1.0, "faithful": 1.0, "solved_later": 0.0}
+    assert _stats(_MISS + "\n" + _HIT, "2, 3", *keys) == {
+        "attempts": 2, "first_try_solved": 0.0, "faithful": 1.0, "solved_later": 1.0}
     # Decided by running the first guess, not by what the rollout says it returned
     claimed = _MISS.replace("(4, 8)", "(5, 10)")
-    assert stats(claimed, "1, 3") == {"attempts": 1, "first_try_solved": 0.0, "faithful": 0.0}
-    assert synth.search_stats(_SEARCH_RECORD, "") == {"attempts": 0, "first_try_solved": 0.0, "faithful": 0.0}
+    assert _stats(claimed, "1, 3", *keys) == {
+        "attempts": 1, "first_try_solved": 0.0, "faithful": 0.0, "solved_later": 0.0}
+    assert set(synth.search_stats(_SEARCH_RECORD, "").values()) == {0.0}
+
+
+def test_search_stats_count_the_attempts_that_get_nearer():
+    """An attempt improves when it lands nearer the target than every one before it."""
+    far = "try 9, 9\na += b  ->  a = 18\nb = (a * 2)  ->  b = 36\nreturn a, b  ->  (18, 36)"
+    keys = ("later_attempts", "improving_attempts")
+
+    assert _stats(_HIT, "2, 3", *keys) == {"later_attempts": 0, "improving_attempts": 0}
+    assert _stats(far + "\n" + _MISS + "\n" + _HIT, "2, 3", *keys) == {
+        "later_attempts": 2, "improving_attempts": 2}
+    # Getting nearer than the last attempt is not enough, and a repeat is not nearer
+    assert _stats(_MISS + "\n" + far + "\n" + _MISS, "1, 3", *keys) == {
+        "later_attempts": 2, "improving_attempts": 0}
+    # Counted from running the guess: a trace that claims the target gains nothing
+    claimed = far.replace("(18, 36)", "(5, 10)")
+    assert _stats(_MISS + "\n" + claimed, "9, 9", *keys)["improving_attempts"] == 0
+
+
+def test_blind_guessing_is_expected_to_improve_once_in_k_on_the_kth_attempt():
+    three = _MISS + "\n" + _MISS + "\n" + _MISS
+    assert _stats(_MISS, "1, 3", "improving_if_blind") == {"improving_if_blind": 0}
+    assert _stats(three, "1, 3", "improving_if_blind")["improving_if_blind"] == pytest.approx(1 / 2 + 1 / 3)
 
 
 def test_miss_argument_spans_cover_every_guess_but_the_one_that_hits():

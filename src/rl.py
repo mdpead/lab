@@ -31,10 +31,17 @@ def score(rows, completions):
     return [float(_TASK_CHECKERS[row["task"]](row, c)) for row, c in zip(rows, completions)]
 
 
-def reward(rows, completions):
-    """The reward each rollout is trained on: its task's graded reward, else its score."""
+def reward(rows, completions, options=None):
+    """The reward each rollout is trained on: its task's graded reward, else its score.
+
+    `options` are keyword arguments for the graded rewards, from train.rl.reward_options.
+    """
     return [
-        float(_TASK_REWARDS.get(row["task"], _TASK_CHECKERS[row["task"]])(row, c))
+        float(
+            _TASK_REWARDS[row["task"]](row, c, **(options or {}))
+            if row["task"] in _TASK_REWARDS
+            else _TASK_CHECKERS[row["task"]](row, c)
+        )
         for row, c in zip(rows, completions)
     ]
 
@@ -256,6 +263,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     temperature = train_config["temperature"]
     minibatch_token_size = train_config.get("minibatch_token_size")
     advantage_sd_floor = train_config.get("advantage_sd_floor", 1e-8)
+    reward_options = train_config.get("reward_options")
 
     optimiser = run["optimiser"]
     lr_scheduler = run["lr_scheduler"]
@@ -325,7 +333,9 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
 
         # Scoring executes the record that produced the prompt, so the whole row is passed
         completions = generation.decode_rollouts(tokenizer, token_ids)
-        rewards = torch.tensor(reward(rows, completions), dtype=torch.float32, device=device)
+        rewards = torch.tensor(
+            reward(rows, completions, reward_options), dtype=torch.float32, device=device
+        )
         rewards = rewards.reshape(len(batch), completions_per_prompt)
         solved = sum(score(rows, completions)) / len(rows)
 

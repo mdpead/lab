@@ -59,6 +59,9 @@ train:
                                    # step, against 33s at 2048. 8192 overflows the card.
     advantage_sd_floor: 0.1        # groups can differ by one attempt's cost of 0.02; below
                                    # this spread the advantage scales down
+    # reward_options:              # unset: a wrong answer earns credit for returned values
+    #   partial_credit: closest    # it gets exactly. `closest` grades how near the rollout's
+    #                              # best guess came instead.
     learning_rate: 1.0e-5
     lr_schedule: constant
     adam_betas: [0.9, 0.95]

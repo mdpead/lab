@@ -460,41 +460,107 @@ def _is_faithful(record, attempt):
 def search_stats(record, completion):
     """How a search rollout went, beyond whether its answer was right.
 
-    `first_try_solved` is the figure only better guessing moves: more attempts lift the
-    pass rate on their own.
+    `first_try_solved` is the figure only better first guesses move: more attempts lift
+    the pass rate on their own. The rest say whether the search after a miss is any good,
+    and are averaged as counts so that their ratios pool over rollouts:
+
+    - `solved_later`: the answer is right after a first attempt that missed. Over
+      1 - first_try_solved, it is how often the search rescues a miss.
+    - `improving_attempts` over `later_attempts`: how often an attempt after the first
+      lands nearer the target than every attempt before it, decided by running it.
+    - `improving_if_blind`: what that count would be for guesses in no particular order,
+      where the k-th beats the k - 1 before it one time in k. A search that uses its
+      misses beats this; ties count as no improvement, so blind guessing falls short.
     """
     attempts = extract_attempts(completion)
-    first = _attempt_args(attempts[0]) if attempts else None
-    outcome = _trace_call(record["source"], first) if first is not None else None
+    nearness = []
+    for attempt in attempts:
+        args = _attempt_args(attempt)
+        outcome = _trace_call(record["source"], args) if args is not None else None
+        nearness.append(_closeness(outcome[0], record["result"]) if outcome is not None else 0.0)
+
+    first_try_solved = bool(nearness) and nearness[0] == 1.0
+    improving = sum(nearness[k] > max(nearness[:k]) for k in range(1, len(nearness)))
     return {
         "attempts": len(attempts),
-        "first_try_solved": float(outcome is not None and outcome[0] == record["result"]),
+        "first_try_solved": float(first_try_solved),
         "faithful": sum(_is_faithful(record, a) for a in attempts) / max(len(attempts), 1),
+        "solved_later": float(not first_try_solved and check_input_answer(record, completion)),
+        "later_attempts": max(len(attempts) - 1, 0),
+        "improving_attempts": improving,
+        "improving_if_blind": sum(1 / k for k in range(2, len(attempts) + 1)),
     }
 
 
+def _value_closeness(value, target):
+    """How near one returned value is to its target, in [0, 1], and 1 only when equal."""
+    if isinstance(value, int) and isinstance(target, int):
+        gap = abs(value - target)
+        # Relative to the target's size, so missing 100 by 5 counts as nearer than 3 by 5
+        return 1 - gap / (gap + abs(target) + 1)
+    if isinstance(value, list) and isinstance(target, list):
+        # Element by element; a missing or surplus element scores nothing
+        pairs = [_value_closeness(v, t) for v, t in zip(value, target)]
+        return sum(pairs) / max(len(value), len(target), 1)
+    return 0.0
+
+
+def _closeness(result, target):
+    """How near a result is to the target, averaged over the values returned.
+
+    Graded where _matches is all-or-nothing per value, so a guess nearer the target
+    scores higher before any value is exactly right.
+    """
+    if not (isinstance(result, tuple) and isinstance(target, tuple) and len(result) == len(target)):
+        return _value_closeness(result, target)
+    return sum(_value_closeness(r, t) for r, t in zip(result, target)) / max(len(target), 1)
+
+
 # Reward terms beside the 1.0 for a correct answer, kept small so they only break ties
-REWARD_MATCH = 0.25  # a wrong answer, scaled by the fraction of returned values it got
+REWARD_MATCH = 0.25  # a wrong answer's partial credit, at most
 REWARD_FAITHFUL = 0.25  # scaled by the fraction of attempts traced as the function runs
 ATTEMPT_COST = 0.02  # per attempt after the first
 
 
-def reward_search_answer(record, completion):
+def _best_closeness(record, completion, attempts):
+    """The nearest any guess in a rollout came to the target: its attempts and its answer.
+
+    Decided by running each guess, not by the trace written for it. The best, not the
+    last: grading the answer alone made stopping after one guess score better than
+    searching on, since a later guess often lands further away, and RL learned to stop.
+    Another attempt can only raise this.
+    """
+    results = [_answer_result(record, completion)]
+    for attempt in attempts:
+        args = _attempt_args(attempt)
+        outcome = _trace_call(record["source"], args) if args is not None else None
+        if outcome is not None:
+            results.append(outcome[0])
+    return max(_closeness(result, record["result"]) for result in results)
+
+
+def reward_search_answer(record, completion, partial_credit="match"):
     """Graded reward for the search task, all decided by running the function.
 
-    - 1.0 for arguments that reach the target, else REWARD_MATCH in proportion to the
-      returned values they do get.
+    - 1.0 for arguments that reach the target, else REWARD_MATCH times a partial credit:
+      "match" is the fraction of returned values the answer gets exactly, "closest" is
+      how near the rollout's best guess came (see _best_closeness).
     - REWARD_FAITHFUL for attempts whose trace is the real one. The last attempt counts
       only if the answer repeats its arguments.
     - ATTEMPT_COST off for each attempt after the first.
     """
+    if partial_credit not in ("match", "closest"):
+        raise ValueError(f"partial_credit must be 'match' or 'closest', got {partial_credit!r}")
+
+    attempts = extract_attempts(completion)
     result = _answer_result(record, completion)
     if result == record["result"]:
         reward = 1.0
-    else:
+    elif partial_credit == "match":
         reward = REWARD_MATCH * _matches(result, record["result"])
+    else:
+        reward = REWARD_MATCH * _best_closeness(record, completion, attempts)
 
-    attempts = extract_attempts(completion)
     if attempts:
         faithful = [_is_faithful(record, attempt) for attempt in attempts]
         if _attempt_args(attempts[-1]) != _answered_args(completion):
