@@ -2,14 +2,16 @@ import warnings
 
 import torch
 import torch.nn.functional as F
+from torch import amp
 
 
-def make_kv_cache(model, batches, seq_length, device):
+def make_kv_cache(model, batches, seq_length, device, dtype=None):
 
     d_h = model.d_h
     num_layers = model.num_layers
     num_kv_heads = model.num_kv_heads
-    dtype = next(model.parameters()).dtype
+    if dtype is None:
+        dtype = next(model.parameters()).dtype
 
     kv_cache = torch.zeros(
         (num_layers, 2, batches, num_kv_heads, seq_length, d_h), device=device, dtype=dtype
@@ -86,25 +88,38 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
     blocked = blocked_token_ids(tokenizer, device)
 
-    kv_cache = make_kv_cache(model, batch_size, input_length + new_tokens, device)
+    # Decoded under autocast, as training runs the model: half the cache memory, and the
+    # sampling policy is then the one the RL loss rescores. The cache holds what the layers
+    # emit, so it takes autocast's dtype.
+    device_type = torch.device(device).type
+    kv_cache = make_kv_cache(
+        model, batch_size, input_length + new_tokens, device, torch.get_autocast_dtype(device_type)
+    )
 
     num_cached = 0
     cur_length = input_length
     training = model.training
     model.eval()
-    with torch.no_grad():
+    with torch.no_grad(), amp.autocast(device_type=device_type):
         for _ in range(new_tokens):
 
             kv_cache_step = kv_cache[..., 0:num_cached, :]
             token_ids_step = token_ids[:, num_cached:cur_length]
 
-            logits, _, new_kv = model(token_ids_step, seq_starts, kv_cache_step)
+            # Only the last position is sampled from, so only it is projected to the
+            # vocabulary. The first pass covers the whole prompt, and its full logits
+            # would be the largest allocation in generation by far.
+            last = torch.zeros_like(token_ids_step, dtype=torch.bool)
+            last[:, -1] = True
+            logits, _, new_kv = model(
+                token_ids_step, seq_starts, kv_cache_step, output_mask=last
+            )  # (batch, vocab)
             kv_cache[..., num_cached:cur_length, :] = new_kv
 
             # Choose the next token
             if temperature > 0:
                 # fp32: bf16 collapses the tail of the vocabulary and skews the draw
-                step_logits = logits[:, -1, :].float()
+                step_logits = logits.float()
                 step_logits[:, blocked] = -float("inf")
                 step_logprobs = F.log_softmax(step_logits / temperature, dim=-1)
                 pred_token_ids = torch.multinomial(step_logprobs.exp(), num_samples=1).squeeze(-1)
@@ -114,7 +129,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
                     1, pred_token_ids[:, None]
                 ).squeeze(1)
             else:
-                pred_token_ids = logits[:, -1, :].argmax(dim=-1)  # (batch,)
+                pred_token_ids = logits.argmax(dim=-1)  # (batch,)
             pred_token_ids = torch.where(finished, tokenizer.pad_token_id, pred_token_ids)
 
             token_ids[:, cur_length] = pred_token_ids

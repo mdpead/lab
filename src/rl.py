@@ -267,6 +267,10 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     blocked = generation.blocked_token_ids(tokenizer, device)
 
     def validate():
+        # Validation generates in its own shapes, so release what the last step left cached
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
         result = validation_step(
             model,
             dataloaders["test"],
@@ -280,6 +284,9 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
             temperature,
             config["seed"],
         )
+        if device.type == "cuda":
+            result["peak_memory_gb"] = torch.cuda.max_memory_reserved() / 2**30
+            torch.cuda.reset_peak_memory_stats()
         logging.info(result)
         results.append(result)
         model.train()
@@ -361,6 +368,10 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         # budget, averaged over the rollouts trained on. A step with no mixed group leaves
         # the weights alone but still counts, so step_no tracks the sampler's position.
         trained_rollouts = trained_groups * completions_per_prompt
+        # Hand generation's cached blocks back first: the allocator keeps them reserved,
+        # and the rescore's differently shaped allocations would stack on top of them.
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
         if trained_rollouts > 0:
             total_loss_pg, total_loss_aux, total_logprob_gap, total_rescored_tokens = (
                 policy_gradient_backward(
@@ -404,6 +415,11 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         # Rescore against the sampling pass on the same tokens: should sit near zero
         result["logprob_gap"] = total_logprob_gap / max(total_rescored_tokens, 1)
         result["grad_norm"] = grad_norm
+        # Reserved, not allocated: it is what the card has to hold. Near the card's size
+        # means the driver is spilling into system memory and the step ran slow.
+        if device.type == "cuda":
+            result["peak_memory_gb"] = torch.cuda.max_memory_reserved() / 2**30
+            torch.cuda.reset_peak_memory_stats()
         results.append(result)
         logging.info(result)
 

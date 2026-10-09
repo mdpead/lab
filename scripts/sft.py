@@ -1,3 +1,9 @@
+import os
+
+# Set before torch loads. Batches here vary in shape from one to the next, which
+# fragments the default allocator until reserved memory overflows the card.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 from src import data, model, tokenizer, train, utils, dataloader
 import logging
 

@@ -48,7 +48,8 @@ train:
 
   rl:
     # Untuned; the same values as sft_only's rl stage, so the two runs differ in the task
-    generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together
+    generation_prompts_size: 64    # x completions_per_prompt = 512 rows, the whole step in
+                                   # one batch (untested here; measured on `search`)
     effective_prompts_size: 64     # prompts per update: 512 rollouts
     completions_per_prompt: 8
     minibatch_token_size: 2048     # padded tokens per backward pass

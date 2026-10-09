@@ -192,8 +192,8 @@ def force_eos_at(model, tokenizer, monkeypatch, row, step):
         calls["n"] += 1
         if calls["n"] == step:
             logits = logits.clone()
-            logits[row, -1] = -1e4
-            logits[row, -1, tokenizer.eos_token_id] = 1e4
+            logits[row] = -1e4
+            logits[row, tokenizer.eos_token_id] = 1e4
         return logits, aux, new_kv
 
     monkeypatch.setattr(model, "forward", forced)

@@ -60,8 +60,8 @@ train:
   rl:
     # Untuned starting points from short trials. The loop learns only when a prompt's
     # rollouts disagree, so watch mixed_group_rate before reading into a flat curve.
-    generation_prompts_size: 4     # x completions_per_prompt = 32 rows generated together.
-                                   # Affects generation speed and memory only.
+    generation_prompts_size: 64    # x completions_per_prompt = 512 rows, the whole step in
+                                   # one batch (untested here; measured on `search`)
     effective_prompts_size: 64     # prompts per update: 512 rollouts, of which only groups
                                    # whose rollouts disagree are trained on (about a fifth)
     completions_per_prompt: 8
