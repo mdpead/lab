@@ -4,7 +4,7 @@ A language model built from scratch and trained through three stages on a single
 
 Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written in this repo, with tests.
 
-> **Status:** the pipeline runs end to end and every stage is tested. A full-size run with pretraining has not been completed yet, so the headline results table below is empty. RL has been run on full-size models trained with SFT alone, on three tasks. On two it moved held-out accuracy by about a point at most. On the third, where the model searches for an answer by trial and error, it raised held-out accuracy from 36.4% to 41.2%.
+> **Status:** the full pipeline has been run end to end at full size, and every stage is tested. Pretraining adds about 3 points of accuracy over training from scratch, provided the fine-tuning learning rate is kept high. RL helped on one of three tasks.
 
 ## What it does
 
@@ -45,266 +45,45 @@ flowchart LR
 | SFT | Generated functions with traces | Cross-entropy on the completion only | `scripts/sft.py` |
 | RL | Freshly generated functions, no traces | GRPO: policy gradient on group-relative advantage | `scripts/rl.py` |
 
+![Three panels, one per stage. Pretraining validation loss falls from 3.92 to 1.465 over 10,000 steps. SFT validation loss falls from 0.104 to 0.0068 over 10,000 steps, on a log scale. RL greedy pass@1 stays between 88.5% and 90.9% over 100 steps.](docs/pipeline.svg)
+
+Pretraining took about 13.5 hours and SFT about 9 hours on one RTX 5070 Ti; RL took 31 minutes. The RL panel's movement is within the noise of its 375-prompt test set, and the larger evaluation below confirms RL changed nothing.
+
 Each stage starts from a pinned checkpoint of the one before, writes to its own directory, and resumes exactly where it stopped. A stage's directory is cleared automatically if the parts of the config it depends on change.
 
 ## Results
 
-All results so far are on the full-size model with no pretraining (the `sft_only` and `input` configurations), on the easy tier, measured on 375 held-out prompts over 95 functions the model has never seen.
+Models have 352M parameters (213M active per token). All figures are greedy pass@1 on the easy tier.
 
-| Task | After SFT | After 100 RL steps | Prompts with signal per RL step |
+### Pretraining
+
+Output prediction, on 3,022 held-out prompts over 780 functions that no stage trained on:
+
+| Starting point for SFT | SFT learning rate | After SFT | After 100 RL steps |
 |---|---|---|---|
-| Output prediction: what does `f(args)` return? | 84.8% | 86.1% | about 1 in 5 |
-| Input prediction: what arguments make `f` return this? | 49.3% | 48.0% | about 1 in 3 |
+| Pretrained on 1.3B tokens of Python (`base_lr3`) | 3e-4 | **89.3%** | **89.3%** |
+| Random init (`sft_only`) | 3e-4 | 86.3% | 86.1% |
+| Pretrained, same weights (`base`) | 1e-4 | 81.3% | 73.6% |
 
-Figures are greedy pass@1. **SFT works; on these two tasks RL has not improved on it.** Both RL changes are within the noise of this test set, which moved by up to 3 points between validations with no trend.
+**Pretraining is worth about 3 points:** +2.9, with a 95% interval of +1.7 to +4.2. The first two rows differ only in their starting weights: same tokenizer, architecture, SFT data and schedule, and RL settings. The interval comes from a bootstrap that resamples whole functions, because prompts on the same function tend to succeed or fail together. A smaller 375-prompt test set had put the gap at 5 points; the larger set shows part of that was noise.
 
-A third task, input prediction as a search, is where RL does help. It is measured on a larger test set, 2,024 held-out prompts over 527 functions, so it has its own table:
+**The fine-tuning learning rate matters more than pretraining.** The same pretrained weights fine-tuned at a third of the rate, a common choice for pretrained models, finished 8 points lower and 5 points below the model trained from scratch. Its validation loss barely improved over the last quarter of SFT and ended at 0.0138, while the run at 3e-4 kept improving to 0.0068.
 
-| Task | After SFT | After 300 RL steps | Prompts with signal per RL step |
+![SFT validation loss over 10,000 steps for the three runs, on a log scale. The pretrained run at 3e-4 is lowest throughout and ends at 0.0068; the from-scratch run ends at 0.0101; the pretrained run at 1e-4 levels off and ends at 0.0138.](docs/sft_curves.svg)
+
+### RL by task
+
+These runs start from the `sft_only` model:
+
+| Task | After SFT | After RL | Prompts with signal per RL step |
 |---|---|---|---|
-| Search: guess arguments, trace them, try again | 36.4% | 41.2% | about 5 in 6 |
+| Output prediction: what does `f(args)` return? | 84.8% | 86.1% (100 steps) | about 1 in 5 |
+| Input prediction: what arguments make `f` return this? | 49.3% | 48.0% (100 steps) | about 1 in 3 |
+| Search: guess arguments, trace them, try again | 36.4% | 41.2% (300 steps) | about 5 in 6 |
 
-A run of the full pipeline with pretraining (`base`) has not been done.
+**RL helped only on search.** Output and input prediction moved by about a point, within the noise of their test sets. On the larger test set above, RL left both 3e-4 models unchanged to within a point, and made the 1e-4 model 8 points worse. Search gained about 5 points on 2,024 held-out prompts, where the standard error is about 1 point. The search task's graded reward is the likely reason: it gives RL something to learn from on most prompts.
 
-### Output prediction
-
-The `sft_only` configuration is the full-size model with no pretraining, trained with SFT for 10,000 steps. It reaches 84.8% greedy pass@1 on 375 held-out prompts (95 functions it has never seen). Its failures are almost all a single wrong sum inside an otherwise correct trace.
-
-RL was then run on it for 100 steps of 64 prompts × 8 rollouts, training only on prompts whose rollouts disagreed (about 12 of the 64 per step):
-
-| RL step | Sampled reward | Greedy pass@1 |
-|---|---|---|
-| 0 | 83.5% | 84.8% |
-| 25 | 84.9% | 86.7% |
-| 50 | 84.8% | 85.9% |
-| 75 | 84.1% | 86.1% |
-| 100 | 83.9% | 86.1% |
-
-**RL did not meaningfully improve this model.** Greedy pass@1 ends 1.3 points up (5 prompts) and sampled reward 0.4 points up. Every validation after the start is above the baseline, so a gain of about a point may be real, but it is too small to separate from noise on this test set.
-
-An earlier run with a smaller test set (93 prompts over 24 functions) and no filtering of uniform groups gave the same picture: an early rise that did not hold, ending within noise of where it started.
-
-Both runs were stable, with no memory failures and the gradient pass matching the sampler to about 0.0001 per token.
-
-**Why.** This task is set up so that SFT has every advantage. The generator supplies unlimited exact traces, so SFT gets a correct target for every token. RL gets one bit per rollout, and only on the roughly one prompt in five where rollouts disagree. What is left to fix is occasional arithmetic slips, which a right-or-wrong signal on the whole answer is poorly placed to find. RL should matter more where many answers are correct and imitation has no single right target, which is the case for input prediction.
-
-### Input prediction
-
-The model is given a function and a result and has to find arguments that produce it. Any arguments that work are accepted, checked by running the function:
-
-```
-def f(a, b):
-    b = ((a + 7) * (0 * 7))
-    b = b
-    b = (4 + a)
-    b = ((1 - 0) - (2 + b))
-    b = 8
-    return a, b
-
-# What arguments make f return (7, 8)?
-<|think|>b = ((a + 7) * (0 * 7))  ->  b = 0
-b = b
-b = (4 + a)  ->  b = 11
-b = ((1 - 0) - (2 + b))  ->  b = -12
-b = 8  ->  b = 8
-return a, b<|/think|><|answer|>7, 1<|/answer|>
-```
-
-Here `b` is overwritten before it is returned, so any value for it is correct. The training data used `7, -1`; the model answered `7, 1`, which is just as right. SFT can only train toward the one arbitrary choice in the data, while the RL reward accepts whatever the function confirms. That is the reason to expect RL to help on this task.
-
-The `input` configuration fine-tunes the `sft_only` model on this task for 1,000 SFT steps, then runs the same RL settings as above:
-
-| RL step | Sampled reward | Greedy pass@1 |
-|---|---|---|
-| 0 | 47.1% | 49.3% |
-| 25 | 44.8% | 46.4% |
-| 50 | 47.1% | 49.3% |
-| 75 | 48.8% | 50.4% |
-| 100 | 47.3% | 48.0% |
-
-**RL did not improve this model either.** It ends within a point or so of where it started, having moved up and down by about 3 points on the way.
-
-This run removes the two easy explanations for the output-prediction result. The model starts at 49%, so there is plenty of room, and about a third of prompts per step had rollouts that disagreed, so there is plenty of signal.
-
-What the model actually does explains more. On the 375 test prompts after SFT:
-
-| Outcome | Prompts |
-|---|---|
-| Correct, with different arguments from the training data's | 149 |
-| Correct, with the same arguments as the data | 36 |
-| Wrong | 190 |
-
-Four in five correct answers use arguments other than the data's, so there really are many valid answers and the checker accepts them. But the failures show the limit of the format. The trace runs forwards from arguments the model must already have chosen, so the hard part of the task, working out which arguments lead to the target, has to happen in one pass before anything is written. Where that needs a chain of operations undone, the model cannot do it. It writes a plausible trace that does not end at the target and reports arguments that do not match the trace:
-
-```
-def f(a, b):
-    a += (b + -5)
-    b = (0 - a)
-    a *= -4
-    a = ((a - a) - (4 * -3))
-    return a, b
-
-# What arguments make f return (12, -2)?
-<|think|>a += (b + -5)  ->  a = -1
-b = (0 - a)  ->  b = -1
-a *= -4  ->  a = 4
-a = ((a - a) - (4 * -3))  ->  a = 12
-return a, b<|/think|><|answer|>0, 0<|/answer|>
-```
-
-The trace ends at `b = -1` where the target needs `-2`, and `0, 0` would not produce that trace. The prompts it gets right are the ones where each argument can be read off the target, is overwritten, or is one operation away.
-
-So the open question is whether RL fails here because 100 steps is too little, with each prompt seen once, or because this format gives the model no room to reason its way to an answer. A format that lets it try a guess, see the trace miss, and try again would test the second.
-
-### Search
-
-The `search` configuration is that format. The question is the same as input prediction, but the model's working is a series of attempts: guess arguments, trace them, compare the result with the target, and try again.
-
-```
-def f(a, b):
-    b = (b - (-1 * 5))
-    b = -4
-    a = (2 * a)
-    b = ((3 - 0) + (a * a))
-    b = b
-    return b, a
-
-# What arguments make f return (39, 6)?
-<|think|>try 9, 0
-...
-return b, a  ->  (327, 18)
-try 6, -3
-...
-return b, a  ->  (147, 12)
-try 3, -1
-...
-return b, a  ->  (39, 6)<|/think|><|answer|>3, -1<|/answer|>
-```
-
-SFT teaches the shape of an attempt and that the search ends on the one that reaches the target. Its examples show up to two missed guesses before the hit, and the arguments of those misses are left out of the loss, so the model is never trained to guess wrongly. Choosing the next guess after a miss has no single right answer in the data, and that is what RL is left to learn.
-
-The RL reward is graded, and every part of it is decided by running the function: 1.0 for an answer that reaches the target, partial credit for a wrong one, credit for attempts whose trace matches real execution, and a small cost per extra attempt. Success is still measured by the plain right-or-wrong check.
-
-The `search` model fine-tunes the `sft_only` model for 1,000 SFT steps, then runs 300 RL steps of 32 prompts × 16 rollouts:
-
-| RL step | Greedy pass@1 | Solved on first attempt | Sampled reward | Attempts | Faithful traces |
-|---|---|---|---|---|---|
-| 0 | 36.4% | 31.4% | 0.334 | 2.26 | 87.0% |
-| 60 | 40.4% | 33.4% | 0.383 | 2.23 | 87.7% |
-| 120 | 40.7% | 32.6% | 0.402 | 2.30 | 91.0% |
-| 180 | 41.7% | 33.2% | 0.407 | 2.31 | 89.6% |
-| 240 | 41.2% | 32.1% | 0.401 | 2.26 | 90.9% |
-| 300 | 41.2% | 33.2% | 0.408 | 2.38 | 89.6% |
-
-**RL improved this model by about 5 points.** With 2,024 test prompts the pass rate's standard error is about 1 point, and it is above the starting point at every validation. Most of the gain came in the first 60 steps, and it had levelled off by step 180.
-
-The graded reward is what gives RL something to work with. About 85% of prompts per step had rollouts that scored differently, against a fifth to a third on the other two tasks.
-
-What changed is how the model searches. On 96 test prompts decoded greedily before and after RL:
-
-| | Before RL | After RL |
-|---|---|---|
-| Failures that repeat a guess already tried | 39 of 63 | 5 of 60 |
-| Failures that stop at exactly three attempts | 54 of 63 | 22 of 60 |
-| Failures with four or more attempts | 4 | 21 |
-| Successes on the first attempt | 29 of 33 | 33 of 36 |
-
-Before RL the model stops after three attempts whether or not it has reached the target, because SFT never showed it more than two misses, and it often answers with a guess it has just watched fail. After RL it has almost stopped repeating guesses and it keeps searching. The last row is the limit: nearly every success is still a first-attempt hit. The later guesses are no longer repeats, but they are not yet informed by the miss before them.
-
-That run gave a wrong answer partial credit only for returned values that were exactly right. Two graded alternatives exist, chosen by `train.rl.reward_options.partial_credit`:
-
-- Grading the answer by how near its result came to the target was tried once, at three times the learning rate, and that run collapsed (below). The answer is the last attempt, so this version can also score stopping early above searching on, and it was dropped.
-- `closest` grades the rollout by its best guess instead of its last, so that searching on is never penalised. It has not been evaluated yet.
-
-**Tripling the learning rate makes RL worse.** At 3e-5 the model stops searching within about 30 steps, with either reward:
-
-| Run, at step 60 | Greedy pass@1 | Attempts | Solved on first attempt |
-|---|---|---|---|
-| Start | 36.4% | 2.26 | 31.4% |
-| Original reward, 1e-5 | 40.4% | 2.23 | 33.4% |
-| Original reward, 3e-5 | 33.7% | 1.55 | 31.0% |
-| Answer-nearness reward, 3e-5 | 32.7% | 1.35 | 31.1% |
-
-First-attempt accuracy is unchanged in the collapsed runs, so the whole loss is the later attempts the model no longer makes. The plateau of the first run was therefore not caused by steps that were too small.
-
-### Earlier trials
-
-These were run on output prediction with an older checkpoint (older answer format, 200 SFT steps, 15% greedy pass@1), so they say how the loop behaves, not how good a model is.
-
-- **On the full prompt set, 60 steps changed nothing.** Sampled reward went 13.4% → 13.1% and greedy pass@1 15.2% → 14.1%, both within noise.
-- **The cause was a lack of signal, not a broken update.** GRPO only learns from a prompt when its rollouts disagree. That model answered most prompts the same way all 8 times, so on average only 2.7 of 16 prompts per step carried any gradient.
-- **On prompts where rollouts do disagree, it learns fast.** Training on 16 such prompts took sampled reward from 30% to 88% and greedy pass@1 from 69% to 94% in 15 steps. This is deliberate overfitting on the training prompts; it shows the update works on the real task and says nothing about generalisation.
-
-## Model
-
-A decoder-only transformer. The `base` configuration is 352M parameters (213M active per token), 16 layers, width 1024.
-
-- **Attention:** grouped-query attention (16 query heads sharing 4 key/value heads) with rotary position embeddings, computed by a custom flash-attention kernel.
-- **Feed-forward:** a mixture of 4 SwiGLU experts with top-2 routing and a load-balancing loss. Experts have fixed capacity during training so tensor shapes stay static; inference never drops a token.
-- **Normalisation:** RMSNorm, pre-norm.
-- **Tokenizer:** byte-level BPE (32k), with every digit as its own token so arithmetic is compositional, and reserved reasoning markers.
-
-### The attention kernel
-
-`src/kernels/flash_attention.py` is a flash attention written in [Triton](https://github.com/triton-lang/triton), forward and backward, used for both training and generation.
-
-- Never materialises the full score matrix: it works in tiles with an online softmax.
-- Understands grouped-query attention directly, so keys and values are never expanded to the query head count.
-- Takes a per-row start offset, so left-padded batches need no attention mask tensor.
-- Handles the cached-decode case in the forward pass, where the queries are only the last few positions of the key sequence.
-- Autotuned over tile sizes, and checked against PyTorch's reference attention for values and gradients.
-
-#### How it compares
-
-Three ways to compute the same attention:
-
-| | Basic attention | PyTorch built-in | This kernel |
-|---|---|---|---|
-| What it is | `softmax(Q Kᵀ / √d) V` written out directly | `scaled_dot_product_attention`, a fused C++/CUDA implementation | Flash attention written in Triton |
-| Score matrix | Built in full: one `seq × seq` matrix per head | Not built, when its flash backend is used | Never built |
-| Extra memory | Grows with the square of the sequence length | Grows linearly | Grows linearly |
-| Grouped-query attention | Keys and values must be repeated per query head | Keys and values must be repeated per query head | Native: each query head reads its group's keys directly |
-| Left-padded batches | Needs a mask tensor | Needs a mask tensor, which cannot be combined with its `is_causal` option | A start offset per row |
-
-PyTorch's built-in is itself a flash attention where it can be: it chooses between a flash backend, a memory-efficient backend and a plain one, preferring flash when the inputs are eligible. That backend is enabled here and accepts the benchmark's inputs, so the comparison below is one flash attention against another, not flash against a naive baseline.
-
-Forward-pass time for causal attention, the case the model uses, on an RTX 5070 Ti in fp16 with batch 4, 4 heads and head dimension 64:
-
-| Sequence length | Basic | PyTorch built-in | This kernel | vs basic | vs built-in |
-|---|---|---|---|---|---|
-| 128 | 0.036 ms | 0.011 ms | 0.009 ms | 4.0x faster | 1.2x faster |
-| 256 | 0.047 ms | 0.015 ms | 0.012 ms | 3.9x faster | 1.3x faster |
-| 512 | 0.095 ms | 0.023 ms | 0.020 ms | 4.8x faster | 1.15x faster |
-| 1024 | 0.339 ms | 0.062 ms | 0.043 ms | 8.0x faster | 1.45x faster |
-
-The gap to basic attention widens with length, as expected when one side is building a matrix that grows with the square of it. Against the built-in the kernel is 15–45% faster on causal attention. On non-causal attention the two are level: the kernel is 1.1–1.4x faster at lengths 128 and 256 and 4–7% slower at 512 and 1024, and about 2.5–3x faster than basic attention at the longer lengths.
-
-What these numbers do and do not show:
-
-- They are small, forward-only timings with equal query and key/value head counts. The ratios to the built-in were stable across three runs; the basic implementation's timings had occasional large outliers at short lengths.
-- They do not cover the backward pass, memory use, or the model's real shapes.
-- They do not measure the two features in the table that the built-in lacks. Avoiding the repeat of keys and values under grouped-query attention, and avoiding a mask tensor for padded batches, are where the kernel should gain most in the actual model, and neither is benchmarked yet.
-
-Reproduce with `pytest tests/test_flash_attention_perf.py --benchmark -s`.
-
-## Reinforcement learning
-
-`src/rl.py` implements GRPO in its simplest form: one update per batch of rollouts, with no value network.
-
-1. For each prompt, sample a group of rollouts.
-2. Score each one by parsing its answer and comparing it with the result of executing the function.
-3. Turn rewards into advantages relative to the rollout's own group (subtract the group mean, divide by the group spread).
-4. Put the rollouts from groups that disagreed back through the model with gradients on, and raise the log-probability of the tokens in rollouts that beat their group.
-
-Details that matter in practice:
-
-- **The gradient pass scores exactly what was sampled.** It uses the same temperature and excludes the same tokens the sampler cannot emit. The difference between the two passes is logged every step as `logprob_gap` and has stayed at or below 0.0005 per token on real runs.
-- **Prompts with no signal are dropped after sampling.** A group whose rollouts all scored the same has zero advantage, so it is not put through the gradient pass, and the update is averaged over the groups that were.
-- **Memory is bounded by tokens.** A rollout's length is only known after it is generated, so a step's rollouts are all generated first and then split to fit a token budget, with gradients accumulated across the pieces. How many prompts are generated together is a separate setting that affects speed only. The result matches the single-pass gradient.
-- **A step's rollouts are generated in one batch.** A decode pass is about 1,400 small kernel launches and costs nearly the same for 512 rows as for 128, so generation time goes with the number of batches. Decoding runs in half precision, as training does, which halves the KV cache. A `search` step of 512 rollouts takes about 30 seconds, most of it generation.
-- **Peak reserved GPU memory is logged every step** as `peak_memory_gb`, for the reason given under "Things that went wrong".
-- **Validation reports two numbers** on a fixed test set: `sampled_reward`, the quantity RL directly optimises, drawn under a fixed seed so runs are comparable; and greedy `pass_rate`, which is what matters in the end and lags behind.
-- **`mixed_group_rate` is logged every step.** It is the share of prompts whose rollouts disagreed, and the first thing to look at when a run is flat.
+Full tables, per-step curves and failure analysis are in [docs/results.md](docs/results.md). Model and kernel details are in [docs/model.md](docs/model.md), the RL loop in [docs/rl.md](docs/rl.md), and the problems hit along the way in [docs/lessons.md](docs/lessons.md).
 
 ## Running it
 
@@ -332,38 +111,39 @@ The tokenizer and pretraining stages download part of StarCoder from Hugging Fac
 
 The tokenizer is its own stage, so a configuration can skip pretraining. `sft_only` has no pretrain stage: run `scripts.tokenizer`, then `scripts.sft`, which trains from random init because the config sets no `train.sft.init_from_step`.
 
+`base` fine-tunes at 1e-4, which underfits. To reproduce the best result, run `base`'s tokenizer and pretrain stages, then `scripts.sft` and `scripts.rl` with `--config base_lr3`, which starts from `base`'s pretrained weights at 3e-4. Its run directory has to be seeded by hand first; the commands are in the comment at the top of `configs/base_lr3.yaml`.
+
 The `input` and `search` configurations start from the `sft_only` model instead of running their own pretraining. Each run directory has to be seeded by hand first; the three commands are in the comment at the top of `configs/input.yaml` and `configs/search.yaml`.
 
-The `search` configuration is the format the input-prediction results point to: the model guesses arguments, traces them, compares the result with the target and tries again, with a graded RL reward that also checks each trace against real execution. Its results are under "Search" above.
+### Evaluation and charts
+
+```bash
+# Greedy pass@1 for a checkpoint on ~3,000 prompts no stage trained on
+python -m scripts.evaluate --config base_lr3 --stage sft --step 10000
+
+# Gap between two results, with a 95% interval from a bootstrap over functions
+python scripts/compare_evals.py models/base_lr3/eval/sft_10000.json models/sft_only/eval/sft_10000.json
+
+# Regenerate the charts in docs/ from the run logs
+python scripts/plot_curves.py
+```
+
+The evaluation draws its functions from a seed no stage trains on, and keeps only those that fall on the test side of every stage's train/test split. A function the generator happens to produce again elsewhere is therefore never one a model trained on.
 
 ### Tests
 
 ```bash
-pytest                                   # 217 tests, needs CUDA
-pytest tests/test_flash_attention_perf.py --benchmark -s   # kernel timings
+pytest                                                      # 217 tests, needs CUDA
+pytest tests/test_flash_attention_perf.py --benchmark -s    # kernel timings
 ```
 
-The suite needs a GPU because every path reaches the Triton kernels. Without CUDA the tests are skipped.
-
-## Things that went wrong
-
-A few of the problems found along the way, kept here because they were more instructive than the parts that worked.
-
-**Generation silently skipped every expert.** Expert capacity was computed as a fraction of the tokens in a forward pass. A cached decode step at batch size 1 has one token, which rounded down to zero slots per expert, so every mixture-of-experts layer contributed nothing. Teacher-forced validation loss looked healthy (0.115) while generated text was a single repeated word. The tests missed it because their fixture used a capacity high enough that nothing was ever dropped. Making inference drop-free took a checkpoint from 0% to 15% pass rate.
-
-**RL ran and learned nothing.** Two runs were flat. Rather than tune blind, the fake-reward tests ruled out a sign or gradient error, the per-step log showed most groups had identical rewards, and an overfit run on prompts with mixed rewards confirmed the loop learns when there is something to learn from.
-
-**The obvious memory culprit was the wrong one.** Two runs died from GPU memory in the RL gradient pass. The vocabulary-sized logits tensor looked responsible; restricting it to the positions actually needed saved 7%. Measuring showed the memory was in the activations kept for backpropagation, which scale with rows × padded length, and an occasional long rollout doubled it. The fix was the token budget described above.
-
-**Allocated memory looked fine while the card was overflowing.** RL steps were slow and uneven, and a benchmark showed 10 GB of live tensors on a 16 GB card. The figure that mattered was reserved memory, which was 22 GB. Each chunk of the gradient pass has a different shape, PyTorch's default allocator cannot reuse blocks across them, and under WSL the driver silently spills the excess into system memory instead of failing. Switching the allocator to expandable segments brought reserved memory down to 11 GB and the gradient pass from 24 seconds to 7.5. A second overflow then showed up as `CUDA driver error: device not ready` with the real cause only in the kernel log: the first decode pass was computing vocabulary logits for every prompt position when only the last is sampled from.
-
-**Two changes at once, and the wrong one got the blame.** A run tripled the RL learning rate and also changed the reward to grade a wrong answer by how near it landed. Within 60 steps the model had stopped searching, with attempts per rollout down from 2.26 to 1.35 and the pass rate below where it started. The reward had a plausible mechanism for exactly that: the answer is the last attempt, later guesses often land further away than the first, so stopping early scores better. The reward was blamed and rewritten. Repeating the run with the original reward showed the same collapse, so the learning rate was the cause. The reward's flaw was real and stays fixed, with partial credit now going to the rollout's best guess, but it was not what broke the run.
+The suite needs a GPU because almost every path reaches the Triton kernels. Without CUDA, all but the CPU-only tests are skipped.
 
 ## Layout
 
 ```
-configs/        YAML configs: test (tiny), base (16 GB card), sft_only, input, search, search_lr3, search_closest
-scripts/        One entry point per stage
+configs/        YAML configs: test (tiny), base (16 GB card), base_lr3, sft_only, input, search, search_lr3, search_closest
+scripts/        One entry point per stage, plus evaluation, comparison and charts
 src/
   model.py        Transformer, GQA, RoPE, mixture of experts
   kernels/        Triton kernels, including flash attention forward and backward
@@ -373,12 +153,15 @@ src/
   generation.py   Batched sampling with a KV cache
   train.py        Pretrain/SFT loop, checkpoints, resume, schedules
   rl.py           GRPO loop and RL validation
+docs/           Results, model and kernel, RL loop, lessons learned
 tests/          One file per module
 ```
 
 ## Limitations and next steps
 
-- No full-size result with pretraining yet.
+- The pretraining result rests on one training run per arm. Its interval covers test-set noise but not run-to-run variation; a second seed would measure that.
+- RL made the 1e-4 model 8 points worse, and its training reward fell over the run too. Why RL hurt this model and left the others alone is not yet understood.
+- Pretraining saw 1.3B tokens, about 6 per active parameter, well short of compute-optimal. A longer run may widen the gap.
 - RL has shown a clear gain on held-out prompts on one task, search, and none on output or input prediction. The search gain levelled off at about 5 points, and nearly all successes are still first-attempt hits: the model searches longer and without repeating itself, but its later guesses are not yet informed by the misses before them.
 - The input-prediction format makes the model commit to its arguments before it has written any working.
 - RL is the minimal form of GRPO. There is no clipping, no KL penalty against the SFT model, and one update per batch of rollouts.
@@ -387,3 +170,7 @@ tests/          One file per module
 - Generation still dominates RL step time. It is bound by per-operation overhead, not compute: the GPU sits at 25 to 45% while decoding. The KV cache is re-concatenated on every pass, and the decode step is not compiled.
 - The RL and SFT scripts rely on PyTorch's expandable-segments allocator, which is still marked experimental, to keep varying batch shapes from fragmenting GPU memory.
 - The RL hyperparameters in the configs are starting points from short trials, not tuned values.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

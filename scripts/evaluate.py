@@ -1,0 +1,98 @@
+import os
+
+# Set before torch loads, as in the training scripts
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+import argparse
+import json
+import logging
+
+import torch
+import yaml
+
+from src import data, generation, model, rl, tokenizer, train, utils
+
+
+# Greedy pass@1 for a saved checkpoint on a test set larger than RL validation's ~400
+# prompts. Functions come from a seed no stage trains on, and only those on the test side
+# of every stage's split are kept, so a function generated again elsewhere is never one a
+# stage trained on.
+def eval_rows(config, num_records, seed):
+    ds_config = {**config["data"]["rl"], "num_records": num_records}
+    ratio = min(config["data"]["sft"]["test_split_ratio"], ds_config["test_split_ratio"])
+    rows = []
+    for record in data._synth_records(ds_config, seed, with_trace=False):
+        if not data._is_test(record["source"], ratio):
+            continue
+        for task in ds_config["tasks"]:
+            prompt, _ = data._TASK_FORMATTERS[task](record, False)
+            rows.append(
+                {
+                    "prompt": prompt,
+                    "task": task,
+                    "source": record["source"],
+                    "args": record["args"],
+                    "result": record["result"],
+                    "n_executed": record["n_executed"],
+                }
+            )
+    return rows
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, help="Config name (e.g. base_lr3)")
+    parser.add_argument("--stage", default="sft", help="Stage whose checkpoint to score")
+    parser.add_argument("--step", type=int, required=True, help="Checkpoint step")
+    parser.add_argument("--num-records", type=int, default=150000, help="Before the split")
+    parser.add_argument("--batch-size", type=int, default=256)
+    args = parser.parse_args()
+
+    with open(f"configs/{args.config}.yaml") as f:
+        config = yaml.safe_load(f)
+
+    # sft draws from seed, rl from seed + 1
+    rows = eval_rows(config, args.num_records, config["seed"] + 2)
+    num_functions = len({row["source"] for row in rows})
+    logging.info(f"eval: {len(rows)} prompts over {num_functions} functions")
+
+    device = torch.device(config["train"][args.stage]["device"])
+    transformer = model.build_transformer(config)
+    train.load_model_weights(
+        transformer, utils.get_stage_path(config, args.stage), device, step=args.step
+    )
+    tok = tokenizer.load_tokenizer(utils.get_run_path(config))
+
+    max_new_tokens = config["train"]["rl"]["max_new_tokens"]
+    passed = []
+    for start in range(0, len(rows), args.batch_size):
+        batch = rows[start : start + args.batch_size]
+        texts, _ = generation.generate_texts(
+            transformer, tok, [row["prompt"] for row in batch], device, max_new_tokens
+        )
+        passed += [bool(s) for s in rl.score(batch, texts)]
+        logging.info(f"eval: {len(passed)}/{len(rows)}, pass rate {sum(passed) / len(passed):.3f}")
+
+    result = {
+        "config": args.config,
+        "stage": args.stage,
+        "step": args.step,
+        "pass_rate": sum(passed) / len(passed),
+        "num_prompts": len(rows),
+        "num_functions": num_functions,
+        # Per prompt, in a fixed order, so runs can be compared prompt by prompt
+        "passed": passed,
+        "sources": [data._hash_position(row["source"]) for row in rows],
+    }
+    out_dir = f"{utils.get_run_path(config)}/eval"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = f"{out_dir}/{args.stage}_{args.step}.json"
+    with open(out_path, "w") as f:
+        json.dump(result, f)
+    logging.info(f"eval: pass rate {result['pass_rate']:.4f}, written to {out_path}")
+
+
+if __name__ == "__main__":
+    main()

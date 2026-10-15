@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" role="img" aria-labelledby="title desc">
+<title id="title">The full pipeline, stage by stage</title>
+<desc id="desc">Three panels. Pretraining validation loss falls from 3.92 at step 500 to 1.465 at step 10,000. SFT validation loss, on a log scale, falls from 0.104 to 0.0068 over 10,000 steps. RL greedy pass@1 stays between 88.5% and 90.9% over 100 steps, starting at 90.1% and ending at 90.9%.</desc>
+<style>
+  .surface { fill: #fcfcfb; }
+  .title { fill: #0b0b0b; font: 600 16px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .panel-title { fill: #0b0b0b; font: 600 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .subtitle, .label { fill: #52514e; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .value { fill: #0b0b0b; font: 600 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .tick { fill: #898781; font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e1e0d9; stroke-width: 1; }
+  .axis { stroke: #c3c2b7; stroke-width: 1; }
+  .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  circle.ring { stroke: #fcfcfb; stroke-width: 2; }
+  .s1 { stroke: #2a78d6; } .s1.dot { fill: #2a78d6; }
+  .s2 { stroke: #eb6834; } .s2.dot { fill: #eb6834; }
+  .s3 { stroke: #1baf7a; } .s3.dot { fill: #1baf7a; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; }
+    .title, .panel-title, .value { fill: #ffffff; }
+    .subtitle, .label { fill: #c3c2b7; }
+    .grid { stroke: #2c2c2a; }
+    .axis { stroke: #383835; }
+    circle.ring { stroke: #1a1a19; }
+    .s1 { stroke: #3987e5; } .s1.dot { fill: #3987e5; }
+    .s2 { stroke: #d95926; } .s2.dot { fill: #d95926; }
+    .s3 { stroke: #199e70; } .s3.dot { fill: #199e70; }
+  }
+</style>
+<rect class="surface" width="960" height="360" rx="8"/>
+<text class="title" x="20" y="30">The full pipeline, stage by stage</text>
+<text class="subtitle" x="20" y="50">Pretraining from base; SFT and RL from base_lr3, which fine-tunes the same pretrained weights at 3e-4.</text>
+<text class="panel-title" x="20" y="80">1. Pretrain</text>
+<text class="label" x="20" y="96">Validation loss, held-out Python</text>
+<text class="panel-title" x="340" y="80">2. SFT</text>
+<text class="label" x="340" y="96">Validation loss, held-out traces</text>
+<text class="panel-title" x="650" y="80">3. RL</text>
+<text class="label" x="650" y="96">Greedy pass@1, 375 held-out prompts</text>
+<line class="grid" x1="70" y1="294.0" x2="280" y2="294.0"/>
+<text class="tick" x="62" y="298.0" text-anchor="end">1</text>
+<line class="grid" x1="70" y1="234.7" x2="280" y2="234.7"/>
+<text class="tick" x="62" y="238.7" text-anchor="end">2</text>
+<line class="grid" x1="70" y1="175.3" x2="280" y2="175.3"/>
+<text class="tick" x="62" y="179.3" text-anchor="end">3</text>
+<line class="grid" x1="70" y1="116.0" x2="280" y2="116.0"/>
+<text class="tick" x="62" y="120.0" text-anchor="end">4</text>
+<line class="axis" x1="70" y1="294" x2="280" y2="294"/>
+<text class="tick" x="70.0" y="312" text-anchor="middle">0</text>
+<text class="tick" x="175.0" y="312" text-anchor="middle">5,000</text>
+<text class="tick" x="280.0" y="312" text-anchor="middle">10,000</text>
+<text class="label" x="175.0" y="334" text-anchor="middle">Pretrain step</text>
+<polyline class="line s1" points="80.5,120.9 91.0,210.6 101.5,231.3 112.0,239.2 122.5,246.3 133.0,250.7 143.5,253.9 154.0,256.1 164.5,257.7 175.0,259.2 185.5,260.6 196.0,261.4 206.5,262.4 217.0,263.2 227.5,263.8 238.0,264.4 248.5,265.1 259.0,265.5 269.5,265.9 280.0,266.4"/>
+<circle class="dot ring s1" cx="280.0" cy="266.4" r="4"><title>Pretrain: 1.465 at step 10,000</title></circle>
+<text class="value" x="292.0" y="270.4">1.465</text>
+<line class="grid" x1="390" y1="294.0" x2="600" y2="294.0"/>
+<text class="tick" x="382" y="298.0" text-anchor="end">0.005</text>
+<line class="grid" x1="390" y1="260.6" x2="600" y2="260.6"/>
+<text class="tick" x="382" y="264.6" text-anchor="end">0.01</text>
+<line class="grid" x1="390" y1="227.1" x2="600" y2="227.1"/>
+<text class="tick" x="382" y="231.1" text-anchor="end">0.02</text>
+<line class="grid" x1="390" y1="182.9" x2="600" y2="182.9"/>
+<text class="tick" x="382" y="186.9" text-anchor="end">0.05</text>
+<line class="grid" x1="390" y1="149.4" x2="600" y2="149.4"/>
+<text class="tick" x="382" y="153.4" text-anchor="end">0.1</text>
+<line class="grid" x1="390" y1="116.0" x2="600" y2="116.0"/>
+<text class="tick" x="382" y="120.0" text-anchor="end">0.2</text>
+<line class="axis" x1="390" y1="294" x2="600" y2="294"/>
+<text class="tick" x="390.0" y="312" text-anchor="middle">0</text>
+<text class="tick" x="495.0" y="312" text-anchor="middle">5,000</text>
+<text class="tick" x="600.0" y="312" text-anchor="middle">10,000</text>
+<text class="label" x="495.0" y="334" text-anchor="middle">SFT step</text>
+<polyline class="line s1" points="394.2,147.7 398.4,166.2 402.6,179.0 406.8,188.7 411.0,193.4 415.2,201.4 419.4,208.3 423.6,210.3 427.8,213.8 432.0,217.2 436.2,221.6 440.4,224.0 444.6,224.3 448.8,228.3 453.0,223.8 457.2,228.7 461.4,233.4 465.6,234.3 469.8,231.8 474.0,234.2 478.2,234.7 482.4,245.8 486.6,244.8 490.8,246.4 495.0,249.4 499.2,244.9 503.4,245.9 507.6,248.0 511.8,244.8 516.0,248.4 520.2,250.7 524.4,254.2 528.6,258.9 532.8,261.8 537.0,257.1 541.2,264.8 545.4,261.3 549.6,264.0 553.8,260.1 558.0,269.5 562.2,270.4 566.4,262.0 570.6,261.4 574.8,262.7 579.0,265.8 583.2,265.2 587.4,271.9 591.6,275.8 595.8,269.2 600.0,278.9"/>
+<circle class="dot ring s1" cx="600.0" cy="278.9" r="4"><title>SFT: 0.0068 at step 10,000</title></circle>
+<text class="value" x="612.0" y="282.9">0.0068</text>
+<line class="grid" x1="700" y1="294.0" x2="880" y2="294.0"/>
+<text class="tick" x="692" y="298.0" text-anchor="end">80%</text>
+<line class="grid" x1="700" y1="234.7" x2="880" y2="234.7"/>
+<text class="tick" x="692" y="238.7" text-anchor="end">85%</text>
+<line class="grid" x1="700" y1="175.3" x2="880" y2="175.3"/>
+<text class="tick" x="692" y="179.3" text-anchor="end">90%</text>
+<line class="grid" x1="700" y1="116.0" x2="880" y2="116.0"/>
+<text class="tick" x="692" y="120.0" text-anchor="end">95%</text>
+<line class="axis" x1="700" y1="294" x2="880" y2="294"/>
+<text class="tick" x="700.0" y="312" text-anchor="middle">0</text>
+<text class="tick" x="790.0" y="312" text-anchor="middle">50</text>
+<text class="tick" x="880.0" y="312" text-anchor="middle">100</text>
+<text class="label" x="790.0" y="334" text-anchor="middle">RL step</text>
+<polyline class="line s1" points="700.0,173.8 745.0,186.4 790.0,192.7 835.0,183.2 880.0,164.3"/>
+<circle class="dot ring s1" cx="880.0" cy="164.3" r="4"><title>RL: 90.9% at step 100</title></circle>
+<text class="value" x="892.0" y="168.3">90.9%</text>
+</svg>

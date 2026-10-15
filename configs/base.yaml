@@ -24,11 +24,13 @@ train:
     learning_rate: 7.0e-4          # 1 / sqrt(d_model * warm_up_steps)
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 35000               # ~4.6B tokens, ~21.5 per active param
+    num_steps: 10000               # ~1.3B tokens, ~6 per active param, ~12h. A first stage:
+                                   # raise to 35000 (~4.6B tokens) to resume if sft shows
+                                   # pretraining helps.
     label_smoothing: 0.0
     router_aux_loss_coef: 0.01     # weight on the MoE load-balancing loss
     device: cuda
-    checkpoint_steps: 5000         # 4.2GB per checkpoint
+    checkpoint_steps: 2000         # 4.2GB per checkpoint; ~2.4h apart
     keep_checkpoints: 3            # omit to keep every checkpoint
     warm_up_steps: 2000
     validation_steps: 500
@@ -39,23 +41,28 @@ train:
 
   sft:
     effective_batch_token_size: 32768
-    minibatch_token_size: 4096     # caps padded tokens, so the same memory as pretrain
-    learning_rate: 7.0e-5          # an order under pretrain
+    # The data, steps and batch are sft_only's, so the two runs differ only in the
+    # weights sft starts from and the learning rate that suits them.
+    minibatch_token_size: 2048     # as sft_only: ragged batches fragmented the allocator at 4096
+    learning_rate: 1.0e-4          # a third of sft_only's. Underfits: base_lr3, at 3e-4 from
+                                   # the same pretrain, scores 89.3% to this one's 81.3%
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 200                 # 74 optimiser steps per epoch, so ~2.7 epochs
+    num_steps: 10000               # ~328M tokens, ~3 epochs; ~5h at sft_only's 17.9k tok/s
     label_smoothing: 0.0
     router_aux_loss_coef: 0.01
     device: cuda
-    checkpoint_steps: 100          # 4.2GB each; the final step saves regardless
+    checkpoint_steps: 2000         # 4.2GB each; the final step saves regardless
     keep_checkpoints: 2
-    warm_up_steps: 10
-    validation_steps: 10
-    validation_batches: 1          # multiplied by grad_accum_steps (8) -> 8 minibatches
-    compile_model: false           # 114 distinct batch widths, over torch's recompile limit
+    warm_up_steps: 200
+    validation_steps: 200
+    validation_batches: 1          # multiplied by grad_accum_steps (16) -> 16 minibatches
+    compile_model: false           # ragged batch widths, over torch's recompile limit
     num_workers: 8
     prefetch_factor: 4
-    init_from_step: 10000          # pretrain is 29% done: these weights are not final
+    init_from_step: 10000          # the pretrain checkpoint to start from. The schedule does
+                                   # not depend on pretrain's num_steps, so any saved step is
+                                   # a usable model; raise this to rerun from a later one.
 
   rl:
     # Untuned starting points from short trials. The loop learns only when a prompt's
@@ -65,20 +72,19 @@ train:
     effective_prompts_size: 64     # prompts per update: 512 rollouts, of which only groups
                                    # whose rollouts disagree are trained on (about a fifth)
     completions_per_prompt: 8
-    minibatch_token_size: 4096     # padded tokens per backward pass. 32 rows x 204 tokens
-                                   # peaked at 12.0GB in one pass and 8.2GB under this.
+    minibatch_token_size: 2048     # padded tokens per backward pass, as sft_only
     learning_rate: 1.0e-5
     lr_schedule: constant          # no decay: the policy keeps making new data
     adam_betas: [0.9, 0.95]
     adam_eps: 1.0e-8
-    num_steps: 300
+    num_steps: 100                 # as sft_only, so the two results tables line up
     max_new_tokens: 256            # an easy-tier traced completion runs well under this
     temperature: 1.0               # raise it first if mixed_group_rate is low
     router_aux_loss_coef: 0.01
     device: cuda
-    checkpoint_steps: 50           # 4.2GB each; the final step saves regardless
-    keep_checkpoints: 2
-    warm_up_steps: 10
+    checkpoint_steps: 20           # 4.2GB each; the final step saves regardless
+    keep_checkpoints: 1
+    warm_up_steps: 5
     validation_steps: 25
     validation_prompts_size: 32    # prompts per validation batch
     validation_batches: 13         # the whole ~400-prompt test split
@@ -86,7 +92,7 @@ train:
                                    # matters is across functions, not draws
     compile_model: false           # generation changes sequence length every step
     cache_clear_steps: 1           # generation and the rescore allocate very different shapes
-    init_from_step: 200            # sft's final step
+    init_from_step: 10000          # sft's final step
 
 data:
   pretrain:
@@ -97,12 +103,12 @@ data:
                            # Omit to load all 59 shards.
 
   sft:
-    num_records: 20000      # -> 18,932 train / 1,068 test rows, 2.38M tokens
+    num_records: 2500000    # as sft_only: ~2.25M train rows at ~129 tokens
     tier: easy              # straight-line code; medium is viable at max_length 1024
     tasks: [output]
     inputs_per_fn: 4
     with_trace: true
-    test_split_ratio: 0.05
+    test_split_ratio: 0.02
 
   rl:
     num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed. 400

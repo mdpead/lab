@@ -1,6 +1,9 @@
-transformers
-torch
-ipykernel
-datasets
-sacrebleu
-pytest
+# Pinned to the versions the project was developed and tested with (Python 3.13, Linux, CUDA)
+torch==2.12.1
+triton==3.7.1
+transformers==5.12.1
+tokenizers==0.22.2
+datasets==5.0.0
+sacrebleu==2.6.0
+pytest==9.1.1
+ipykernel==7.3.0
