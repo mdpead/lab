@@ -2,8 +2,8 @@ from src import data, tokenizer, utils
 import logging
 
 
-# Train the BPE tokenizer on the pretrain corpus. Every later stage loads it from the run
-# directory, so this runs once per config, before any of them.
+# Train the BPE tokenizer on the pretrain corpus. Later stages load it from the run
+# directory, so this runs once per config.
 def main():
 
     logging.basicConfig(level=logging.INFO)

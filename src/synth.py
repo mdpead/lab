@@ -3,8 +3,8 @@ import random
 import re
 import sys
 
-# Values stay small so the task is hard because of control flow, not arithmetic. Programs
-# that leave the range are rejected after execution rather than clamped.
+# Small values, so difficulty comes from control flow, not arithmetic.
+# Programs leaving the range are rejected after execution, not clamped.
 VALUE_MIN, VALUE_MAX = -500, 500
 MAX_RESULT_CHARS = 80
 
@@ -14,7 +14,7 @@ INT_VARS = ["a", "b", "c", "d"]
 LIST_VARS = ["xs", "ys"]
 
 # max_executed caps executed lines, bounding trace length. Retune against the tokenizer:
-# the budget that matters is trace tokens, and RL needs headroom above it.
+# trace tokens are the budget that matters, and RL needs headroom above it.
 TIERS = {
     # max_depth 0 is straight-line code, which a freshly pretrained model can do
     "easy": dict(n_stmts=(3, 5), max_depth=0, n_ints=2, n_lists=0, loop_range=(2, 3), max_executed=25),
@@ -242,8 +242,8 @@ def generate(n, tier="medium", seed=0, inputs_per_fn=4, with_trace=True):
                 }
             )
 
-        # Require that the input actually moves the result: otherwise output prediction
-        # is memorisable and input prediction is satisfied by anything.
+        # Require the input to move the result, or output prediction is memorisable
+        # and input prediction is trivially satisfied.
         if len({repr(r["result"]) for r in batch}) < 2:
             continue
 
@@ -284,8 +284,8 @@ def format_input_task(record, include_trace):
 
 # Opens each attempt in the search task's thinking. No generated statement starts with it.
 TRY_PREFIX = "try "
-# Most missed guesses shown before the one that works. The count varies per example so
-# that stopping follows from reaching the target, not from how many came before.
+# Most missed guesses shown before the successful one. The count varies per example,
+# so stopping follows from reaching the target, not from a fixed count.
 MAX_MISSES = 2
 
 

@@ -88,9 +88,8 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
 
     blocked = blocked_token_ids(tokenizer, device)
 
-    # Decoded under autocast, as training runs the model: half the cache memory, and the
-    # sampling policy is then the one the RL loss rescores. The cache holds what the layers
-    # emit, so it takes autocast's dtype.
+    # Decoded under autocast, as training runs the model: half the cache memory, and
+    # the sampling policy matches what RL rescores. The cache takes autocast's dtype.
     device_type = torch.device(device).type
     kv_cache = make_kv_cache(
         model, batch_size, input_length + new_tokens, device, torch.get_autocast_dtype(device_type)
@@ -106,9 +105,8 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
             kv_cache_step = kv_cache[..., 0:num_cached, :]
             token_ids_step = token_ids[:, num_cached:cur_length]
 
-            # Only the last position is sampled from, so only it is projected to the
-            # vocabulary. The first pass covers the whole prompt, and its full logits
-            # would be the largest allocation in generation by far.
+            # Only the last position is sampled, so only it is projected to the vocabulary.
+            # The prompt pass would otherwise allocate the largest tensor in generation.
             last = torch.zeros_like(token_ids_step, dtype=torch.bool)
             last[:, -1] = True
             logits, _, new_kv = model(
@@ -123,8 +121,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
                 step_logits[:, blocked] = -float("inf")
                 step_logprobs = F.log_softmax(step_logits / temperature, dim=-1)
                 pred_token_ids = torch.multinomial(step_logprobs.exp(), num_samples=1).squeeze(-1)
-                # Gathered before the <pad> overwrite below, whose logprob is -inf and
-                # would turn a masked sum into nan
+                # Gathered before the <pad> overwrite, whose -inf logprob would make the sum nan.
                 logprobs[:, cur_length] = step_logprobs.gather(
                     1, pred_token_ids[:, None]
                 ).squeeze(1)

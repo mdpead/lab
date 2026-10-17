@@ -62,8 +62,8 @@ class TokenSampler(Sampler):
         self.batches = self.generate_batches(ds)
 
     def generate_batches(self, ds):
-        # Read `length` as a whole column where the dataset has one: row-at-a-time access
-        # on an arrow dataset is slow. Plain lists of dicts fall back to rows.
+        # Read `length` as a whole column when the dataset has one; row access on arrow is slow.
+        # Plain lists of dicts fall back to rows.
         if hasattr(ds, "column_names"):
             lengths = list(ds["length"])
         else:

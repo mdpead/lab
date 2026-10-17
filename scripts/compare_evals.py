@@ -2,9 +2,8 @@ import argparse
 import json
 import random
 
-# Pass-rate gap between two evaluate.py results on the same prompts, with a 95% interval
-# from a bootstrap over functions. Prompts sharing a function succeed or fail together, so
-# resampling prompts independently would make the interval too narrow.
+# Pass-rate gap between two evaluate.py runs, with a 95% bootstrap interval over functions.
+# Prompts sharing a function succeed or fail together, so resample functions, not prompts.
 
 
 def load(path):

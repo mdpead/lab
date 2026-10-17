@@ -8,9 +8,8 @@ from src import data, utils
 def create_tokenizer(ds, tokenizer_config):
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
 
-    # digit_split gives every digit its own token, so the model can learn arithmetic on
-    # digits rather than memorise each number as an unrelated id. Read from the config so
-    # that changing it invalidates the saved tokenizer and checkpoints.
+    # digit_split gives each digit its own token, so arithmetic is learnable.
+    # Read from the config: changing it invalidates the saved tokenizer and checkpoints.
     byte_level = pre_tokenizers.ByteLevel(add_prefix_space=False)
     if tokenizer_config.get("digit_split"):
         tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
@@ -20,9 +19,8 @@ def create_tokenizer(ds, tokenizer_config):
         tokenizer.pre_tokenizer = byte_level
     tokenizer.decoder = decoders.ByteLevel()
 
-    # Reasoning and answer delimiters, pipe-guarded so they cannot collide with Python
-    # reprs like "<class 'int'>". Reserved now, with spare slots, because the vocabulary
-    # is fixed once pretraining starts.
+    # Reasoning and answer delimiters, pipe-guarded so they can't collide with Python reprs.
+    # Reserved with spare slots: the vocabulary is fixed once pretraining starts.
     special_tokens = [
         "<bos>", "<eos>", "<pad>", "<unk>",
         "<|think|>", "<|/think|>",

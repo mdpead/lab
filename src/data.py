@@ -10,9 +10,8 @@ from torch.utils.data import Dataset
 from src import synth
 
 
-# StarCoder prefixes ~48% of files with metadata markers on the first line, and the files
-# do not parse as Python until they are gone. Anchored to the start of the file, and
-# requiring the newline so a marker-only file is left alone.
+# StarCoder prefixes ~48% of files with metadata markers; they don't parse until removed.
+# Anchored to the file start, and needs the newline so marker-only files are left alone.
 _MARKER_PREFIX = re.compile(r"^<(?:reponame|filename|gh_stars)>[^\n]*\n")
 
 
@@ -45,8 +44,8 @@ def get_dataset_pretrain(config):
 
     num_shards = ds_config.get("num_shards")
     if num_shards is not None:
-        # Download only the shards the step budget needs. Assumes the corpus was shuffled
-        # before sharding, which shard 0 is consistent with but has not been checked.
+        # Only download the shards the step budget needs.
+        # Assumes the corpus was shuffled before sharding (unchecked for shard 0).
         logging.info(f"pretrain: loading {num_shards} of {PYTHON_SHARDS} shards")
         ds = hf_datasets.load_dataset(
             "bigcode/starcoderdata", data_files=_shard_files(num_shards), split="train"
@@ -62,8 +61,7 @@ def get_dataset_pretrain(config):
         ds = ds.select(range(min(sample_size, len(ds))))
         logging.info(f"pretrain: capped at {len(ds)} files")
 
-    # Split on a hash of the repo, not on row index: rows are shuffled corpus-wide, so an
-    # index cut puts files from the same repo on both sides and flatters validation loss.
+    # Split on a hash of the repo, not row index: index cuts put one repo on both sides.
     # The realised test fraction only approximates the configured ratio.
     ratio = ds_config["test_split_ratio"]
 
@@ -184,15 +182,14 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
     out = {k: [] for k in ("ids", "prompt_len", "length", "unscored") + carried}
     for i, (prompt, completion) in enumerate(zip(prompts, completions)):
         ids = [bos_id] + prompt + completion + [eos_id]
-        # One over the context, for the input/target shift. Over-long tasks are dropped:
-        # truncating would cut off the answer.
+        # One over the context, for the input/target shift. Over-long tasks are dropped.
         if len(ids) > max_length + 1:
             continue
         out["ids"].append(ids)
         out["prompt_len"].append(1 + len(prompt))
         out["length"].append(len(ids) - 1)
-        # Positions in `ids` of tokens touching an unscored span. A typed array, so a batch
-        # with none still writes an integer column.
+        # Positions in `ids` touching an unscored span.
+        # Typed array, so a batch with none still writes an integer column.
         spans = _TASK_UNSCORED.get(batch["task"][i], lambda completion: [])(batch["completion"][i])
         out["unscored"].append(
             np.array(
@@ -226,8 +223,7 @@ def prepare_sft(ds_raw, tokenizer, config):
         fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
         desc="Tokenizing sft",
     )
-    # map() can serve a cached result from before `unscored` existed, and the collate
-    # would treat the missing column as nothing to mask.
+    # A cached map() result from before `unscored` existed would leave the column missing.
     if "unscored" not in prepared.column_names:
         raise RuntimeError(
             f"sft: stale tokenised cache without `unscored`: delete {prepared.cache_files}"

@@ -84,8 +84,8 @@ def init_run_dir(config):
     run_path = get_run_path(config)
     os.makedirs(run_path, exist_ok=True)
 
-    # The tokenizer is loaded from disk whenever it exists, so a changed tokenizer config
-    # needs its own check or it would be silently ignored.
+    # Tokenizer loads from disk whenever it exists, so a changed config needs its own check.
+    # Otherwise it would be silently ignored.
     if os.path.exists(f"{run_path}/config.json"):
         existing = load_config(run_path)
         if existing.get("tokenizer") != config.get("tokenizer"):

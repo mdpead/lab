@@ -13,10 +13,8 @@ import yaml
 from src import data, generation, model, rl, tokenizer, train, utils
 
 
-# Greedy pass@1 for a saved checkpoint on a test set larger than RL validation's ~400
-# prompts. Functions come from a seed no stage trains on, and only those on the test side
-# of every stage's split are kept, so a function generated again elsewhere is never one a
-# stage trained on.
+# Greedy pass@1 on a test set larger than RL validation's ~400 prompts.
+# Functions come from a seed no stage trains on; only those on every stage's test side are kept.
 def eval_rows(config, num_records, seed):
     ds_config = {**config["data"]["rl"], "num_records": num_records}
     ratio = min(config["data"]["sft"]["test_split_ratio"], ds_config["test_split_ratio"])

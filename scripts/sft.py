@@ -1,7 +1,6 @@
 import os
 
-# Set before torch loads. Batches here vary in shape from one to the next, which
-# fragments the default allocator until reserved memory overflows the card.
+# Set before torch loads. Varying batch shapes fragment the allocator until the card overflows.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from src import data, model, tokenizer, train, utils, dataloader
@@ -30,8 +29,8 @@ def main():
     # Rows are ragged, so batches come from a TokenSampler against a token budget
     dataloaders = dataloader.create_dataloaders_sft(ds, token, config)
 
-    # train.sft.init_from_step pins the pretrain checkpoint whose weights seed this stage.
-    # Without it there is no pretraining to start from, and sft trains from random init.
+    # train.sft.init_from_step pins the pretrain checkpoint that seeds this stage.
+    # Without it, sft trains from random init.
     init_from = None
     if "init_from_step" in config["train"]["sft"]:
         init_from = utils.get_stage_path(config, "pretrain")

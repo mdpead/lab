@@ -233,8 +233,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         if step_no >= num_steps:
             break
 
-    # A final save when num_steps is not a multiple of checkpoint_steps, so the steps since
-    # the last checkpoint (and their results.json records) are not lost.
+    # Final save when num_steps isn't a multiple of checkpoint_steps, so the tail isn't lost.
     if step_no % checkpoint_steps != 0:
         save_checkpoint(
             model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints

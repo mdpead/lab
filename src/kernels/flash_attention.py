@@ -802,8 +802,8 @@ def flash_attention_backward(
 
     BATCHES, Q_HEADS, SEQS, HEAD_DIMS = q.shape
     KV_HEADS = k.shape[1]
-    # Backward is training-only, where q and k always cover the same positions; the
-    # unequal-length (kv cache) case runs under no_grad and never reaches here
+    # Backward is training-only (q and k cover the same positions). The unequal-length
+    # kv-cache case runs under no_grad and never reaches here.
     assert k.shape[2] == SEQS
     assert seq_starts.shape == (BATCHES,)
     dq = torch.empty_like(q)

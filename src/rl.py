@@ -181,8 +181,7 @@ def policy_gradient_backward(
     device = token_ids.device
     length = token_ids.shape[1]
 
-    # One past each row's last real token. Right padding only follows a finished row, and
-    # sampling cannot emit <pad>, so the trailing pads are exactly the filler.
+    # One past each row's last real token; trailing pads are filler.
     is_pad = token_ids == tokenizer.pad_token_id
     ends = (length - is_pad.flip(1).int().cumprod(1).sum(1)).tolist()
     starts = seq_starts.tolist()
@@ -197,8 +196,7 @@ def policy_gradient_backward(
         chosen = completion_mask[rows, left:right]
         chunk_starts = seq_starts[rows] - left
 
-        # seq_starts and padding_mask reproduce the context generation saw. output_mask
-        # projects only the positions whose next token the model chose.
+        # Same context generation saw; output_mask keeps the sampled positions.
         predicts_completion = F.pad(chosen[:, 1:], (0, 1), value=False)
         with amp.autocast(device_type=device.type):
             logits, loss_aux = model(
@@ -208,16 +206,15 @@ def policy_gradient_backward(
                 output_mask=predicts_completion,
             )  # (completion tokens, vocab), row-major
 
-        # fp32, tempered and with the blocked ids removed, exactly as generate sampled:
-        # the gradient needs the logprobs of the distribution the rollouts were drawn from.
+        # fp32, tempered, blocked ids removed: the distribution rollouts came from.
         step_logits = logits.float() / temperature
         step_logits[:, blocked] = -float("inf")
         # Boolean indexing is row-major on both sides, so these line up with the logits
         targets = ids[:, 1:][chosen[:, 1:]]
         new_logprobs = -F.cross_entropy(step_logits, targets, reduction="none")  # (tokens,)
 
-        # Mean over each rollout's own tokens, so a long completion does not outweigh a
-        # short one. Summed over rollouts, not averaged: the caller scales.
+        # Per-rollout token mean, so long completions don't dominate.
+        # Summed over rollouts; the caller scales.
         row_of_token = predicts_completion.nonzero()[:, 0]
         tokens_per_row = predicts_completion.sum(-1)
         per_seq = torch.zeros(len(chunk), device=device).index_add_(0, row_of_token, new_logprobs)
@@ -339,14 +336,12 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         rewards = rewards.reshape(len(batch), completions_per_prompt)
         solved = sum(score(rows, completions)) / len(rows)
 
-        # Group-relative advantage. The floor stops a group whose graded rewards barely
-        # differ from being normalised up to a full-size advantage.
+        # Group-relative advantage. The floor stops near-uniform groups being scaled up.
         mean = rewards.mean(dim=-1, keepdim=True)
         sd = rewards.std(dim=-1, keepdim=True)
         advantages = ((rewards - mean) / sd.clamp(min=advantage_sd_floor)).reshape(-1)
 
-        # A uniform group has zero advantage and so zero gradient: drop it rather than
-        # rescore it, and keep it out of the average.
+        # Uniform groups have zero advantage: drop them, and keep them out of the average.
         mixed = sd.squeeze(-1) > 0  # (prompts,)
         keep = mixed.repeat_interleave(completions_per_prompt).nonzero().squeeze(-1)
 
@@ -374,12 +369,10 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         if (minibatch_idx + 1) % minibatches_per_step != 0:
             continue
 
-        # Rescore and backpropagate the whole step's rollouts, in chunks that fit the token
-        # budget, averaged over the rollouts trained on. A step with no mixed group leaves
-        # the weights alone but still counts, so step_no tracks the sampler's position.
+        # Rescore and backprop the step's rollouts in chunks that fit the token budget.
+        # A step with no mixed group leaves the weights alone but still advances step_no.
         trained_rollouts = trained_groups * completions_per_prompt
-        # Hand generation's cached blocks back first: the allocator keeps them reserved,
-        # and the rescore's differently shaped allocations would stack on top of them.
+        # Release generation's cached blocks first, or the rescore stacks on top of them.
         if device.type == "cuda":
             torch.cuda.empty_cache()
         if trained_rollouts > 0:
@@ -425,8 +418,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         # Rescore against the sampling pass on the same tokens: should sit near zero
         result["logprob_gap"] = total_logprob_gap / max(total_rescored_tokens, 1)
         result["grad_norm"] = grad_norm
-        # Reserved, not allocated: it is what the card has to hold. Near the card's size
-        # means the driver is spilling into system memory and the step ran slow.
+        # Reserved, not allocated. Near the card's size means spilling into system memory.
         if device.type == "cuda":
             result["peak_memory_gb"] = torch.cuda.max_memory_reserved() / 2**30
             torch.cuda.reset_peak_memory_stats()
