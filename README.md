@@ -1,5 +1,7 @@
 # python-reasoning-lm
 
+[![CI](https://github.com/mdpead/python-reasoning-lm/actions/workflows/ci.yml/badge.svg)](https://github.com/mdpead/python-reasoning-lm/actions/workflows/ci.yml)
+
 A language model built from scratch and trained through three stages on a single 16 GB GPU: pretraining on Python source, supervised fine-tuning to trace small programs step by step, and reinforcement learning with rewards checked by actually running the program.
 
 Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written in this repo, with tests.
@@ -135,6 +137,7 @@ The evaluation draws its functions from a seed no stage trains on, and keeps onl
 ```bash
 pytest                                                      # 241 tests with CUDA, 101 without
 pytest tests/test_flash_attention_perf.py --benchmark -s    # kernel timings
+ruff check . && ruff format --check .                       # lint and formatting
 ```
 
 Tests that build a model or call the Triton kernels are marked `cuda` and skipped without a GPU. The rest, covering program generation, data preparation, sampling and reward scoring, run on CPU in a few seconds.

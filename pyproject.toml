@@ -10,3 +10,7 @@ ignore = ["E731", "E741"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "scripts"]
+
+[tool.pytest.ini_options]
+# Lets a bare `pytest` import src, as `python -m pytest` already could
+pythonpath = ["."]
