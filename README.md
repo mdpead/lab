@@ -133,11 +133,11 @@ The evaluation draws its functions from a seed no stage trains on, and keeps onl
 ### Tests
 
 ```bash
-pytest                                                      # 217 tests, needs CUDA
+pytest                                                      # 241 tests with CUDA, 101 without
 pytest tests/test_flash_attention_perf.py --benchmark -s    # kernel timings
 ```
 
-The suite needs a GPU because almost every path reaches the Triton kernels. Without CUDA, all but the CPU-only tests are skipped.
+Tests that build a model or call the Triton kernels are marked `cuda` and skipped without a GPU. The rest, covering program generation, data preparation, sampling and reward scoring, run on CPU in a few seconds.
 
 ## Layout
 

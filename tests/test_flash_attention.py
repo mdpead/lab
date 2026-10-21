@@ -9,6 +9,8 @@ import torch
 
 from src.kernels.flash_attention import flash_attention
 
+pytestmark = pytest.mark.cuda
+
 DEV = "cuda"
 DTYPE = torch.float16
 

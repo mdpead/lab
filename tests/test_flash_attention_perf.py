@@ -10,6 +10,8 @@ import triton
 
 from src.kernels.flash_attention import flash_attention_forward
 
+pytestmark = pytest.mark.cuda
+
 DEV = "cuda"
 BATCHES, HEADS, HEAD_DIMS = 4, 4, 64
 SEQS = [128, 256, 512, 1024]

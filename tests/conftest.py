@@ -19,14 +19,18 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "benchmark: timing comparison, only collected with --benchmark"
     )
+    config.addinivalue_line("markers", "cuda: needs a GPU, skipped without one")
 
 
-# The Triton kernels need CUDA and every test reaches them, so skip the suite without it
+# The Triton kernels need CUDA. A model's forward pass reaches them, so any test built on
+# make_model needs it too; kernel test modules mark themselves. The rest runs on CPU.
 def pytest_collection_modifyitems(config, items):
     no_cuda = pytest.mark.skip(reason="requires CUDA")
     not_asked = pytest.mark.skip(reason="benchmark: pass --benchmark to run")
     for item in items:
-        if not torch.cuda.is_available():
+        if "make_model" in item.fixturenames:
+            item.add_marker(pytest.mark.cuda)
+        if "cuda" in item.keywords and not torch.cuda.is_available():
             item.add_marker(no_cuda)
         elif "benchmark" in item.keywords and not config.getoption("--benchmark"):
             item.add_marker(not_asked)
