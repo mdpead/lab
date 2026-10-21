@@ -1,13 +1,14 @@
 import argparse
-import os
 import json
 import logging
-import shutil
+import os
 import random
+import shutil
+from typing import Any
+
 import numpy as np
 import torch
 import yaml
-from typing import Any
 
 # A parsed configs/<name>.yaml
 Config = dict[str, Any]

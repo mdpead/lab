@@ -18,7 +18,7 @@ PROMPTS = ["hello", "the quick", "foo bar", "brown fox"]
 def _continuation(row, completion):
     # decode_rollouts returns the prompt and its continuation as one string
     assert completion.startswith(row["prompt"])
-    return completion[len(row["prompt"]):]
+    return completion[len(row["prompt"]) :]
 
 
 def _rewarded_ids(tokenizer):
@@ -46,8 +46,16 @@ def _mass_on(model, tokenizer, ids):
 
 
 def _run(
-    model, tokenizer, tmp_path, monkeypatch, checker, num_steps, temperature=1.0, max_new_tokens=1,
-    reward=None, **overrides,
+    model,
+    tokenizer,
+    tmp_path,
+    monkeypatch,
+    checker,
+    num_steps,
+    temperature=1.0,
+    max_new_tokens=1,
+    reward=None,
+    **overrides,
 ):
     monkeypatch.setitem(rl._TASK_CHECKERS, "fake", checker)
     if reward is not None:
@@ -75,12 +83,18 @@ def _run(
     config = {"seed": 0, "model": {"max_length": 64}, "train": {"rl": train_config}}
 
     rows = [
-        {"prompt": p, "task": "fake", "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"])}
+        {
+            "prompt": p,
+            "task": "fake",
+            "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"]),
+        }
         for p in PROMPTS
     ]
     dataloaders = create_dataloaders_rl({"train": rows, "test": rows}, tokenizer, config)
 
-    _, optimiser, lr_scheduler, scaler = train.create_training_objects(model, train_config, tokenizer)
+    _, optimiser, lr_scheduler, scaler = train.create_training_objects(
+        model, train_config, tokenizer
+    )
     run = {
         "optimiser": optimiser,
         "lr_scheduler": lr_scheduler,
@@ -138,12 +152,15 @@ def test_uniform_groups_are_dropped_and_leave_the_weights_alone(
     assert all(r["trained_groups"] == 0 for r in train_results)
     assert all(r["loss_pg"] == 0 and r["grad_norm"] == 0 for r in train_results)
     assert all(r["mixed_group_rate"] == 0 for r in train_results)
-    assert all(r["reward"] == 1 for r in train_results), "reward is over every group, dropped or not"
+    assert all(r["reward"] == 1 for r in train_results), (
+        "reward is over every group, dropped or not"
+    )
     assert all(torch.equal(a, b) for a, b in zip(before, fresh_model.parameters()))
 
 
 def test_only_mixed_groups_are_trained_on(fresh_model, tokenizer, tmp_path, monkeypatch):
     """Groups for one prompt always agree; only the others reach the rescore."""
+
     def checker(row, completion):
         return True if row["prompt"] == "hello" else _space_led(row, completion)
 
@@ -160,7 +177,12 @@ def test_a_graded_reward_trains_while_the_checker_still_reports_success(
 ):
     """The gradient follows a task's graded reward; its checker is what is reported."""
     results = _run(
-        fresh_model, tokenizer, tmp_path, monkeypatch, lambda row, c: False, num_steps=2,
+        fresh_model,
+        tokenizer,
+        tmp_path,
+        monkeypatch,
+        lambda row, c: False,
+        num_steps=2,
         reward=lambda row, c: 0.5 * _space_led(row, c),
     )
     train_results = _train(results)
@@ -187,8 +209,14 @@ def test_advantage_sd_floor_shrinks_the_update_from_a_narrow_group(
         fresh_model.load_state_dict(state)
         torch.manual_seed(0)
         results = _run(
-            fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1,
-            reward=narrow, **overrides,
+            fresh_model,
+            tokenizer,
+            tmp_path,
+            monkeypatch,
+            _space_led,
+            num_steps=1,
+            reward=narrow,
+            **overrides,
         )
         norms.append(_train(results)[0]["grad_norm"])
 
@@ -214,30 +242,44 @@ def test_rescore_matches_sampling_logprobs_at_other_temperatures(
 ):
     """The gradient pass scores the tempered distribution the sampler drew from."""
     results = _train(
-        _run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1, temperature=2.0)
+        _run(
+            fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1, temperature=2.0
+        )
     )
     assert results[0]["trained_groups"] > 0, "nothing was rescored, so the gap is vacuous"
     assert results[0]["logprob_gap"] < 1e-3
 
 
-def test_sampled_validation_is_reproducible_and_leaves_training_rng(fresh_model, tokenizer, monkeypatch):
+def test_sampled_validation_is_reproducible_and_leaves_training_rng(
+    fresh_model, tokenizer, monkeypatch
+):
     """Same weights, same score, and training's own random stream is not advanced."""
-    monkeypatch.setitem(rl._TASK_CHECKERS, "fake", lambda row, c: _continuation(row, c).startswith(" "))
+    monkeypatch.setitem(
+        rl._TASK_CHECKERS, "fake", lambda row, c: _continuation(row, c).startswith(" ")
+    )
     rows = [
-        {"prompt": p, "task": "fake", "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"])}
+        {
+            "prompt": p,
+            "task": "fake",
+            "length": 1 + len(tokenizer(p, add_special_tokens=False)["input_ids"]),
+        }
         for p in PROMPTS
     ]
     config = {"seed": 0, "train": {"rl": {"generation_prompts_size": 2}}}
     loader = create_dataloaders_rl({"test": rows}, tokenizer, config)["test"]
 
     def validate():
-        return rl.validation_step(fresh_model, loader, tokenizer, torch.device(DEV), 0, 1, 10, 16, 1.0, 0)
+        return rl.validation_step(
+            fresh_model, loader, tokenizer, torch.device(DEV), 0, 1, 10, 16, 1.0, 0
+        )
 
     torch.manual_seed(123)
     expected_next = torch.rand(1, device=DEV)
     torch.manual_seed(123)
     first = validate()
-    assert torch.equal(torch.rand(1, device=DEV), expected_next), "validation consumed the global RNG"
+    assert torch.equal(torch.rand(1, device=DEV), expected_next), (
+        "validation consumed the global RNG"
+    )
 
     assert validate() == first
     assert 0 < first["sampled_reward"] < 1
@@ -248,7 +290,15 @@ def test_rescore_lines_up_over_multi_token_rollouts(fresh_model, tokenizer, tmp_
     """Each rescored token is matched to the one the sampler drew, across prompts of
     different lengths."""
     results = _train(
-        _run(fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1, max_new_tokens=12)
+        _run(
+            fresh_model,
+            tokenizer,
+            tmp_path,
+            monkeypatch,
+            _space_led,
+            num_steps=1,
+            max_new_tokens=12,
+        )
     )
     assert results[0]["num_completion_tokens"] > 16 * 4 * 2, "rollouts were not multi-token"
     assert results[0]["trained_groups"] > 0, "nothing was rescored, so the gap is vacuous"
@@ -278,7 +328,9 @@ def test_chunked_rescore_gives_the_single_pass_gradient(fresh_model, tokenizer):
     """Splitting the rescore to fit a token budget changes peak memory, not the update."""
     from src import generation
 
-    prompts = [p for p in ["hello", "the quick brown fox jumps over", "foo bar baz"] for _ in range(4)]
+    prompts = [
+        p for p in ["hello", "the quick brown fox jumps over", "foo bar baz"] for _ in range(4)
+    ]
     torch.manual_seed(0)
     token_ids, completion_mask, old_logprobs, seq_starts, _ = generation.generate(
         fresh_model, tokenizer, prompts, DEV, max_new_tokens=12, temperature=1.0
@@ -290,8 +342,19 @@ def test_chunked_rescore_gives_the_single_pass_gradient(fresh_model, tokenizer):
     def grads(budget):
         fresh_model.zero_grad(set_to_none=True)
         stats = rl.policy_gradient_backward(
-            fresh_model, tokenizer, torch.amp.GradScaler(enabled=False), token_ids,
-            completion_mask, old_logprobs, seq_starts, advantages, blocked, 1.0, 0.01, 1.0, budget,
+            fresh_model,
+            tokenizer,
+            torch.amp.GradScaler(enabled=False),
+            token_ids,
+            completion_mask,
+            old_logprobs,
+            seq_starts,
+            advantages,
+            blocked,
+            1.0,
+            0.01,
+            1.0,
+            budget,
         )
         flat = torch.cat([p.grad.flatten() for p in fresh_model.parameters() if p.grad is not None])
         return flat, stats
@@ -317,7 +380,10 @@ def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, t
 
     torch.manual_seed(0)
     minibatches = []
-    for prompts, max_new_tokens in ((["hello", "foo bar baz"], 4), (["the quick brown fox jumps over"], 12)):
+    for prompts, max_new_tokens in (
+        (["hello", "foo bar baz"], 4),
+        (["the quick brown fox jumps over"], 12),
+    ):
         prompts = [p for p in prompts for _ in range(4)]
         token_ids, completion_mask, old_logprobs, seq_starts, _ = generation.generate(
             fresh_model, tokenizer, prompts, DEV, max_new_tokens=max_new_tokens, temperature=1.0
@@ -332,7 +398,14 @@ def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, t
         fresh_model.zero_grad(set_to_none=True)
         stats = [
             rl.policy_gradient_backward(
-                fresh_model, tokenizer, torch.amp.GradScaler(enabled=False), *group, blocked, 1.0, 0.01, 1.0,
+                fresh_model,
+                tokenizer,
+                torch.amp.GradScaler(enabled=False),
+                *group,
+                blocked,
+                1.0,
+                0.01,
+                1.0,
             )
             for group in groups
         ]
@@ -350,10 +423,17 @@ def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, t
     assert pooled_stats[2] / pooled_stats[3] < 1e-3
 
 
-def test_a_step_that_is_not_whole_minibatches_is_refused(fresh_model, tokenizer, tmp_path, monkeypatch):
+def test_a_step_that_is_not_whole_minibatches_is_refused(
+    fresh_model, tokenizer, tmp_path, monkeypatch
+):
     with pytest.raises(ValueError, match="multiple of generation_prompts_size"):
         _run(
-            fresh_model, tokenizer, tmp_path, monkeypatch, _space_led, num_steps=1,
+            fresh_model,
+            tokenizer,
+            tmp_path,
+            monkeypatch,
+            _space_led,
+            num_steps=1,
             generation_prompts_size=3,
         )
 

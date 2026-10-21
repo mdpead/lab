@@ -1,9 +1,10 @@
-from torch import nn
-import torch
 import math
-from src.kernels import flash_attention
+
+import torch
+from torch import Tensor, nn
 from torch.nn import functional as F
-from torch import Tensor
+
+from src.kernels import flash_attention
 from src.utils import Config
 
 
@@ -55,7 +56,7 @@ class MixtureOfExpertsFeedForward(nn.Module):
 
         n, d = x.shape[0] * x.shape[1], x.shape[-1]
 
-        x_flat = x.reshape(-1, x.shape[-1]) # (batch * seq = n, d)
+        x_flat = x.reshape(-1, x.shape[-1])  # (batch * seq = n, d)
 
         # Pad tokens aren't data: without this they take expert seats and skew the balance loss.
         # Capacity still derives from the padded n.
@@ -66,14 +67,21 @@ class MixtureOfExpertsFeedForward(nn.Module):
         )
         router_logits = self.router(x_flat)
         route_l, route_ind = torch.topk(router_logits, self.top_k, dim=-1)
-        route_p = F.softmax(route_l, dim=-1) # (n, k)
+        route_p = F.softmax(route_l, dim=-1)  # (n, k)
         full_p = F.softmax(router_logits, dim=-1, dtype=torch.float32)  # (n, e)
 
         # Assign seats to each token
-        token_expert_oh = F.one_hot(route_ind, self.num_experts) * real.unsqueeze(-1) # (n, k, e)
-        rank_km = token_expert_oh.permute(1,0,2).reshape(route_ind.shape[0] * self.top_k, -1).cumsum(0) - 1 # (n * k, e)
-        token_expert_seat = rank_km.reshape(self.top_k, route_ind.shape[0], self.num_experts).permute(1, 0, 2) # (n, k, e)
-        token_choice_seat = token_expert_seat.gather(-1, route_ind.unsqueeze(-1)).squeeze(-1) # (n, k)
+        token_expert_oh = F.one_hot(route_ind, self.num_experts) * real.unsqueeze(-1)  # (n, k, e)
+        rank_km = (
+            token_expert_oh.permute(1, 0, 2).reshape(route_ind.shape[0] * self.top_k, -1).cumsum(0)
+            - 1
+        )  # (n * k, e)
+        token_expert_seat = rank_km.reshape(
+            self.top_k, route_ind.shape[0], self.num_experts
+        ).permute(1, 0, 2)  # (n, k, e)
+        token_choice_seat = token_expert_seat.gather(-1, route_ind.unsqueeze(-1)).squeeze(
+            -1
+        )  # (n, k)
 
         # Capacity only drops tokens in training, where it bounds padded compute.
         # At inference n can be one decode step (zero seats), so n seats never overflow.
@@ -84,15 +92,18 @@ class MixtureOfExpertsFeedForward(nn.Module):
         # A pad never keeps its seat, so one condition covers overflow and padding
         keep = (token_choice_seat < capacity) & real
         gate = route_p * keep
-        seat_safe = torch.where(keep, token_choice_seat, capacity) # (n, k)
+        seat_safe = torch.where(keep, token_choice_seat, capacity)  # (n, k)
 
         # Dispatch
-        token_idx = torch.arange(n, device=x.device).unsqueeze(1).expand(n, self.top_k) # (n, k)
-        t_flat, e_flat, s_flat = token_idx.reshape(-1), route_ind.reshape(-1), seat_safe.reshape(-1) # (n * k,)
+        token_idx = torch.arange(n, device=x.device).unsqueeze(1).expand(n, self.top_k)  # (n, k)
+        t_flat, e_flat, s_flat = (
+            token_idx.reshape(-1),
+            route_ind.reshape(-1),
+            seat_safe.reshape(-1),
+        )  # (n * k,)
 
         buf = x_flat.new_zeros(self.num_experts, capacity + 1, d)
-        buf[e_flat, s_flat] = x_flat[t_flat] # (e, c + 1, d)
-
+        buf[e_flat, s_flat] = x_flat[t_flat]  # (e, c + 1, d)
 
         # Fixed (capacity + 1, d) slice per expert. Row `capacity` is an overflow bin
         # for dropped assignments, which carry a zero gate.

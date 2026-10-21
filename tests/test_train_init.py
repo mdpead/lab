@@ -1,12 +1,12 @@
 """Starting a stage from an earlier stage's weights."""
 
-import copy
 import os
 
 import pytest
 import torch
 
-from src import tokenizer as tokenizer_module, train, utils
+from src import tokenizer as tokenizer_module
+from src import train, utils
 
 DEV = "cuda"
 
@@ -16,18 +16,26 @@ def staged(tmp_path, make_model, tokenizer):
     """A pretrain stage with two checkpoints, and a config pointing an sft stage at it."""
     model = make_model(len(tokenizer)).float()
     cfg = {
-        "name": "t", "seed": 0,
+        "name": "t",
+        "seed": 0,
         "locations": {"models_dir": str(tmp_path)},
-        "train": {"pretrain": {}, "sft": {
-            "device": DEV, "learning_rate": 1e-4, "adam_betas": [0.9, 0.95],
-            "adam_eps": 1e-8, "label_smoothing": 0.0, "warm_up_steps": 5,
-        }},
+        "train": {
+            "pretrain": {},
+            "sft": {
+                "device": DEV,
+                "learning_rate": 1e-4,
+                "adam_betas": [0.9, 0.95],
+                "adam_eps": 1e-8,
+                "label_smoothing": 0.0,
+                "warm_up_steps": 5,
+            },
+        },
     }
     pre = utils.get_stage_path(cfg, "pretrain")
     tc = cfg["train"]["sft"]
     _, opt, sched, scaler = train.create_training_objects(model, tc, tokenizer)
     for step in (100, 200):
-        with torch.no_grad():                       # make the two checkpoints differ
+        with torch.no_grad():  # make the two checkpoints differ
             next(model.parameters()).add_(float(step))
         train.save_checkpoint(model, opt, sched, scaler, pre, step, [])
     return cfg, pre, model
@@ -42,9 +50,13 @@ def test_seeds_a_fresh_stage_from_the_earlier_one(staged, make_model, tokenizer)
     fresh = make_model(len(tokenizer)).float()
     assert not torch.equal(_first_param(fresh), _first_param(source))
 
-    run = train.get_run(utils.get_stage_path(cfg, "sft"), fresh,
-                        {**cfg["train"]["sft"], "init_from_step": 200}, tokenizer,
-                        init_from=pre)
+    run = train.get_run(
+        utils.get_stage_path(cfg, "sft"),
+        fresh,
+        {**cfg["train"]["sft"], "init_from_step": 200},
+        tokenizer,
+        init_from=pre,
+    )
 
     assert torch.equal(_first_param(fresh), _first_param(source)), "weights did not transfer"
     assert run["step_no"] == 0, "step counter must not come across"
@@ -57,26 +69,40 @@ def test_init_from_step_selects_the_pinned_checkpoint(staged, make_model, tokeni
     cfg, pre, _ = staged
     a, b = make_model(len(tokenizer)).float(), make_model(len(tokenizer)).float()
     tc = cfg["train"]["sft"]
-    train.get_run(utils.get_stage_path(cfg, "sft"), a, {**tc, "init_from_step": 100},
-                  tokenizer, init_from=pre)
-    train.get_run(utils.get_stage_path(cfg, "sft"), b, {**tc, "init_from_step": 200},
-                  tokenizer, init_from=pre)
+    train.get_run(
+        utils.get_stage_path(cfg, "sft"), a, {**tc, "init_from_step": 100}, tokenizer, init_from=pre
+    )
+    train.get_run(
+        utils.get_stage_path(cfg, "sft"), b, {**tc, "init_from_step": 200}, tokenizer, init_from=pre
+    )
     assert not torch.equal(_first_param(a), _first_param(b))
 
 
 def test_missing_pinned_step_is_an_error(staged, make_model, tokenizer):
     cfg, pre, _ = staged
     with pytest.raises(FileNotFoundError, match="init_from_step 999 not found"):
-        train.get_run(utils.get_stage_path(cfg, "sft"), make_model(len(tokenizer)).float(),
-                      {**cfg["train"]["sft"], "init_from_step": 999}, tokenizer, init_from=pre)
+        train.get_run(
+            utils.get_stage_path(cfg, "sft"),
+            make_model(len(tokenizer)).float(),
+            {**cfg["train"]["sft"], "init_from_step": 999},
+            tokenizer,
+            init_from=pre,
+        )
 
 
 def test_missing_source_stage_is_an_error(tmp_path, make_model, tokenizer):
-    cfg = {"name": "t", "seed": 0, "locations": {"models_dir": str(tmp_path)},
-           "train": {"sft": {"device": DEV}}}
+    cfg = {
+        "name": "t",
+        "seed": 0,
+        "locations": {"models_dir": str(tmp_path)},
+        "train": {"sft": {"device": DEV}},
+    }
     with pytest.raises(FileNotFoundError, match="No checkpoints in"):
-        train.load_model_weights(make_model(len(tokenizer)).float(),
-                                 utils.get_stage_path(cfg, "pretrain"), torch.device(DEV))
+        train.load_model_weights(
+            make_model(len(tokenizer)).float(),
+            utils.get_stage_path(cfg, "pretrain"),
+            torch.device(DEV),
+        )
 
 
 def test_resume_ignores_the_source_stage(staged, make_model, tokenizer):
@@ -85,7 +111,7 @@ def test_resume_ignores_the_source_stage(staged, make_model, tokenizer):
     sft = utils.get_stage_path(cfg, "sft")
     own = make_model(len(tokenizer)).float()
     with torch.no_grad():
-        next(own.parameters()).fill_(-7.0)          # unmistakably not the pretrain weights
+        next(own.parameters()).fill_(-7.0)  # unmistakably not the pretrain weights
     tc = cfg["train"]["sft"]
     _, opt, sched, scaler = train.create_training_objects(own, tc, tokenizer)
     train.save_checkpoint(own, opt, sched, scaler, sft, 50, [])
@@ -102,18 +128,29 @@ def test_resume_ignores_the_source_stage(staged, make_model, tokenizer):
 
 def _loop_config(tmp_path, num_steps, checkpoint_steps):
     return {
-        "name": "t", "seed": 0,
+        "name": "t",
+        "seed": 0,
         "locations": {"models_dir": str(tmp_path)},
         "model": {"max_length": 64},
-        "train": {"sft": {
-            "device": DEV, "learning_rate": 1e-4, "adam_betas": [0.9, 0.95],
-            "adam_eps": 1e-8, "label_smoothing": 0.0, "warm_up_steps": 2,
-            "effective_batch_token_size": 256, "minibatch_token_size": 128,
-            "num_steps": num_steps, "checkpoint_steps": checkpoint_steps,
-            "keep_checkpoints": 10, "validation_steps": 10_000,
-            "validation_batches": 1, "router_aux_loss_coef": 0.01,
-            "num_workers": 0,
-        }},
+        "train": {
+            "sft": {
+                "device": DEV,
+                "learning_rate": 1e-4,
+                "adam_betas": [0.9, 0.95],
+                "adam_eps": 1e-8,
+                "label_smoothing": 0.0,
+                "warm_up_steps": 2,
+                "effective_batch_token_size": 256,
+                "minibatch_token_size": 128,
+                "num_steps": num_steps,
+                "checkpoint_steps": checkpoint_steps,
+                "keep_checkpoints": 10,
+                "validation_steps": 10_000,
+                "validation_batches": 1,
+                "router_aux_loss_coef": 0.01,
+                "num_workers": 0,
+            }
+        },
     }
 
 
@@ -121,8 +158,7 @@ def _run_loop(cfg, make_model, tokenizer):
     from src import dataloader as dl
 
     rows = [
-        {"ids": [1] + [5 + (i % 7)] * (10 + i % 5) + [2], "prompt_len": 3,
-         "length": 11 + i % 5}
+        {"ids": [1] + [5 + (i % 7)] * (10 + i % 5) + [2], "prompt_len": 3, "length": 11 + i % 5}
         for i in range(24)
     ]
     model = make_model(len(tokenizer)).float()
@@ -175,9 +211,17 @@ def test_final_checkpoint_carries_the_results_for_its_steps(tmp_path, make_model
 
 @pytest.mark.parametrize("schedule, decays", [("inverse_sqrt", True), ("constant", False)])
 def test_lr_schedule_is_chosen_by_config(make_model, tokenizer, schedule, decays):
-    tc = {"device": DEV, "learning_rate": 1e-3, "adam_betas": [0.9, 0.95], "adam_eps": 1e-8,
-          "warm_up_steps": 4, "lr_schedule": schedule}
-    _, opt, sched, _ = train.create_training_objects(make_model(len(tokenizer)).float(), tc, tokenizer)
+    tc = {
+        "device": DEV,
+        "learning_rate": 1e-3,
+        "adam_betas": [0.9, 0.95],
+        "adam_eps": 1e-8,
+        "warm_up_steps": 4,
+        "lr_schedule": schedule,
+    }
+    _, opt, sched, _ = train.create_training_objects(
+        make_model(len(tokenizer)).float(), tc, tokenizer
+    )
     lrs = []
     for _ in range(20):
         opt.step()
@@ -192,8 +236,12 @@ def test_lr_schedule_is_chosen_by_config(make_model, tokenizer, schedule, decays
 
 
 def _run_config(tmp_path, vocab_size=100):
-    return {"name": "t", "seed": 0, "locations": {"models_dir": str(tmp_path)},
-            "tokenizer": {"vocab_size": vocab_size}}
+    return {
+        "name": "t",
+        "seed": 0,
+        "locations": {"models_dir": str(tmp_path)},
+        "tokenizer": {"vocab_size": vocab_size},
+    }
 
 
 def test_loading_a_tokenizer_that_was_never_trained_says_how_to_train_it(tmp_path):

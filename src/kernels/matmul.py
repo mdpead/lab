@@ -1,5 +1,4 @@
 import torch
-
 import triton
 import triton.language as tl
 
@@ -66,7 +65,6 @@ def matmul_kernel(
     # Loop over K
     c_tile = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-
         # Calculate k offsets and mask
         offsets_k = k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
         mask_k = offsets_k < K

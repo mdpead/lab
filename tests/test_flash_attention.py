@@ -70,9 +70,15 @@ def assert_no_worse_than_reference(actual, exact, same_precision, label, slack=2
 
 def _inputs(batch, q_heads, kv_heads, seq, head_dim, pads, requires_grad=False, k_seq=None):
     k_seq = seq if k_seq is None else k_seq
-    q = torch.randn(batch, q_heads, seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad)
-    k = torch.randn(batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad)
-    v = torch.randn(batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad)
+    q = torch.randn(
+        batch, q_heads, seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
+    k = torch.randn(
+        batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
+    v = torch.randn(
+        batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
     seq_starts = torch.tensor(pads, device=DEV, dtype=torch.int32)
     return q, k, v, seq_starts
 
@@ -102,7 +108,9 @@ def test_forward_matches_reference(q_heads, kv_heads, causal, pads):
 @pytest.mark.parametrize("pads", [[0, 0], [5, 40]])
 def test_backward_matches_reference(q_heads, kv_heads, pads):
     seq, head_dim, causal = 64, 32, True
-    q, k, v, seq_starts = _inputs(len(pads), q_heads, kv_heads, seq, head_dim, pads, requires_grad=True)
+    q, k, v, seq_starts = _inputs(
+        len(pads), q_heads, kv_heads, seq, head_dim, pads, requires_grad=True
+    )
 
     # Weight the loss so pad-position queries contribute nothing
     weights = torch.zeros(len(pads), 1, seq, 1, device=DEV)
@@ -140,8 +148,11 @@ def test_padding_is_invisible(q_heads, kv_heads):
 
     unpadded = flash_attention(q, k, v, torch.zeros(1, device=DEV, dtype=torch.int32), causal=True)
     padded = flash_attention(
-        pad_front(q), pad_front(k), pad_front(v),
-        torch.full((1,), pad, device=DEV, dtype=torch.int32), causal=True,
+        pad_front(q),
+        pad_front(k),
+        pad_front(v),
+        torch.full((1,), pad, device=DEV, dtype=torch.int32),
+        causal=True,
     )
 
     err = _max_err(padded[:, :, pad:], unpadded)

@@ -117,7 +117,6 @@ def generate(
     model.eval()
     with torch.no_grad(), amp.autocast(device_type=device_type):
         for _ in range(new_tokens):
-
             kv_cache_step = kv_cache[..., 0:num_cached, :]
             token_ids_step = token_ids[:, num_cached:cur_length]
 
@@ -138,9 +137,9 @@ def generate(
                 step_logprobs = F.log_softmax(step_logits / temperature, dim=-1)
                 pred_token_ids = torch.multinomial(step_logprobs.exp(), num_samples=1).squeeze(-1)
                 # Gathered before the <pad> overwrite, whose -inf logprob would make the sum nan.
-                logprobs[:, cur_length] = step_logprobs.gather(
-                    1, pred_token_ids[:, None]
-                ).squeeze(1)
+                logprobs[:, cur_length] = step_logprobs.gather(1, pred_token_ids[:, None]).squeeze(
+                    1
+                )
             else:
                 pred_token_ids = logits.argmax(dim=-1)  # (batch,)
             pred_token_ids = torch.where(finished, tokenizer.pad_token_id, pred_token_ids)
@@ -194,9 +193,7 @@ def generate_texts(
     Each text is the prompt plus its continuation. `finished[i]` is True when row i
     stopped on <eos> rather than running out of budget.
     """
-    token_ids, _, _, _, finished = generate(
-        model, tokenizer, input_texts, device, max_new_tokens
-    )
+    token_ids, _, _, _, finished = generate(model, tokenizer, input_texts, device, max_new_tokens)
 
     texts = decode_rollouts(tokenizer, token_ids)
 

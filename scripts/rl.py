@@ -3,8 +3,9 @@ import os
 # Set before torch loads. Varying batch shapes fragment the allocator until the card overflows.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-from src import data, model, tokenizer, utils, rl, train, dataloader
 import logging
+
+from src import data, dataloader, model, rl, tokenizer, utils
 
 
 # RL on synth tasks: sample rollouts, score by executing them, update on GRPO advantages.
@@ -22,7 +23,7 @@ def main() -> None:
 
     ds = data.prepare_rl(ds_raw, token, config)
 
-    logging.info(f"rl prompts: {  {split: len(rows) for split, rows in ds.items()} }")
+    logging.info(f"rl prompts: { {split: len(rows) for split, rows in ds.items()} }")
 
     dataloaders = dataloader.create_dataloaders_rl(ds, token, config)
 

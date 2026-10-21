@@ -102,13 +102,15 @@ def test_rows_longer_than_the_context_are_dropped(tokenizer):
     assert all(n <= bound for n in tight["train"]["length"])
 
 
-
 def test_rl_prompts_are_not_the_sft_functions(tokenizer):
     """RL scores answers, so functions sft showed the answers to would reward recall."""
     cfg = _config(tokenizer, 400)
     cfg["data"]["rl"] = {
-        "num_records": 200, "tier": "easy", "tasks": ["output"],
-        "inputs_per_fn": 4, "test_split_ratio": 0.1,
+        "num_records": 200,
+        "tier": "easy",
+        "tasks": ["output"],
+        "inputs_per_fn": 4,
+        "test_split_ratio": 0.1,
     }
 
     def rl_sources():
@@ -135,7 +137,15 @@ def _lossless_tokenizer():
         trainers.BpeTrainer(
             vocab_size=0,
             initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
-            special_tokens=["<bos>", "<eos>", "<pad>", "<|think|>", "<|/think|>", "<|answer|>", "<|/answer|>"],
+            special_tokens=[
+                "<bos>",
+                "<eos>",
+                "<pad>",
+                "<|think|>",
+                "<|/think|>",
+                "<|answer|>",
+                "<|/answer|>",
+            ],
         ),
     )
     return PreTrainedTokenizerFast(
@@ -151,7 +161,9 @@ def test_search_rows_leave_exactly_the_missed_guesses_unscored():
     cfg, ds = _prepared(tokenizer, 60, max_length=2048, tasks=("search",))
     pad = tokenizer.pad_token_id
     rows = [ds["train"][i] for i in range(len(ds["train"]))]
-    assert any(len(row["unscored"]) for row in rows) and any(not len(row["unscored"]) for row in rows)
+    assert any(len(row["unscored"]) for row in rows) and any(
+        not len(row["unscored"]) for row in rows
+    )
 
     for row in rows:
         targets = dataloader.collate_sft_batch([row], pad)["output_ids"][0]

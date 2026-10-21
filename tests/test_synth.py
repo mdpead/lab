@@ -244,8 +244,10 @@ def test_closeness_is_one_only_for_the_target_itself():
         "",
         f"{synth.THINK_OPEN}try 1, 3\na += b",  # out of budget mid-attempt
         f"{synth.THINK_OPEN}try 1,\n{synth.THINK_CLOSE}{synth.ANSWER_OPEN}1,{synth.ANSWER_CLOSE}",
-        f"{synth.THINK_OPEN}try nonsense{synth.THINK_CLOSE}{synth.ANSWER_OPEN}(({synth.ANSWER_CLOSE}",
-        f"{synth.THINK_OPEN}try 'x', []{synth.THINK_CLOSE}{synth.ANSWER_OPEN}'x', []{synth.ANSWER_CLOSE}",
+        f"{synth.THINK_OPEN}try nonsense{synth.THINK_CLOSE}"
+        f"{synth.ANSWER_OPEN}(({synth.ANSWER_CLOSE}",
+        f"{synth.THINK_OPEN}try 'x', []{synth.THINK_CLOSE}"
+        f"{synth.ANSWER_OPEN}'x', []{synth.ANSWER_CLOSE}",
     ],
 )
 def test_search_reward_scores_malformed_rollouts_without_raising(completion):
@@ -262,13 +264,25 @@ def test_search_stats_separate_a_first_try_hit_from_a_later_one():
     keys = ("attempts", "first_try_solved", "faithful", "solved_later")
 
     assert _stats(_HIT, "2, 3", *keys) == {
-        "attempts": 1, "first_try_solved": 1.0, "faithful": 1.0, "solved_later": 0.0}
+        "attempts": 1,
+        "first_try_solved": 1.0,
+        "faithful": 1.0,
+        "solved_later": 0.0,
+    }
     assert _stats(_MISS + "\n" + _HIT, "2, 3", *keys) == {
-        "attempts": 2, "first_try_solved": 0.0, "faithful": 1.0, "solved_later": 1.0}
+        "attempts": 2,
+        "first_try_solved": 0.0,
+        "faithful": 1.0,
+        "solved_later": 1.0,
+    }
     # Decided by running the first guess, not by what the rollout says it returned
     claimed = _MISS.replace("(4, 8)", "(5, 10)")
     assert _stats(claimed, "1, 3", *keys) == {
-        "attempts": 1, "first_try_solved": 0.0, "faithful": 0.0, "solved_later": 0.0}
+        "attempts": 1,
+        "first_try_solved": 0.0,
+        "faithful": 0.0,
+        "solved_later": 0.0,
+    }
     assert set(synth.search_stats(_SEARCH_RECORD, "").values()) == {0.0}
 
 
@@ -279,10 +293,14 @@ def test_search_stats_count_the_attempts_that_get_nearer():
 
     assert _stats(_HIT, "2, 3", *keys) == {"later_attempts": 0, "improving_attempts": 0}
     assert _stats(far + "\n" + _MISS + "\n" + _HIT, "2, 3", *keys) == {
-        "later_attempts": 2, "improving_attempts": 2}
+        "later_attempts": 2,
+        "improving_attempts": 2,
+    }
     # Getting nearer than the last attempt is not enough, and a repeat is not nearer
     assert _stats(_MISS + "\n" + far + "\n" + _MISS, "1, 3", *keys) == {
-        "later_attempts": 2, "improving_attempts": 0}
+        "later_attempts": 2,
+        "improving_attempts": 0,
+    }
     # Counted from running the guess: a trace that claims the target gains nothing
     claimed = far.replace("(18, 36)", "(5, 10)")
     assert _stats(_MISS + "\n" + claimed, "9, 9", *keys)["improving_attempts"] == 0
@@ -291,7 +309,9 @@ def test_search_stats_count_the_attempts_that_get_nearer():
 def test_blind_guessing_is_expected_to_improve_once_in_k_on_the_kth_attempt():
     three = _MISS + "\n" + _MISS + "\n" + _MISS
     assert _stats(_MISS, "1, 3", "improving_if_blind") == {"improving_if_blind": 0}
-    assert _stats(three, "1, 3", "improving_if_blind")["improving_if_blind"] == pytest.approx(1 / 2 + 1 / 3)
+    assert _stats(three, "1, 3", "improving_if_blind")["improving_if_blind"] == pytest.approx(
+        1 / 2 + 1 / 3
+    )
 
 
 def test_miss_argument_spans_cover_every_guess_but_the_one_that_hits():
@@ -302,7 +322,7 @@ def test_miss_argument_spans_cover_every_guess_but_the_one_that_hits():
         attempts = synth.extract_attempts(completion)
         spanned = [completion[lo:hi] for lo, hi in synth.miss_argument_spans(completion)]
 
-        assert spanned == [a.split("\n")[0][len(synth.TRY_PREFIX):] for a in attempts[:-1]]
+        assert spanned == [a.split("\n")[0][len(synth.TRY_PREFIX) :] for a in attempts[:-1]]
         seen_misses |= bool(spanned)
     assert seen_misses
 

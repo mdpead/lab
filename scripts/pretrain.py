@@ -1,5 +1,6 @@
-from src import data, tokenizer, model, train, utils, dataloader
 import logging
+
+from src import data, dataloader, model, tokenizer, train, utils
 
 
 # Everything runs under a __main__ guard, because DataLoader workers re-import this module

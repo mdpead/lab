@@ -1,10 +1,8 @@
 from typing import Any
 
 import torch
-
 import triton
 import triton.language as tl
-
 from torch import Tensor
 
 
@@ -675,7 +673,6 @@ def flash_attention_backward_kernel_dkdv(
 
     # Loop over Q heads for GQA
     for q_head_idx in range(Q_HEADS // KV_HEADS):
-
         # Loop over Q tiles
         for tile_idx in range(
             q_tile_start_idx,
@@ -962,9 +959,7 @@ class FlashAttentionFunction(torch.autograd.Function):
         return o
 
     @staticmethod
-    def backward(
-        ctx: Any, *grad_outputs: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor, None, None]:
+    def backward(ctx: Any, *grad_outputs: Tensor) -> tuple[Tensor, Tensor, Tensor, None, None]:
         (do,) = grad_outputs
         q, k, v, o, l, seq_starts = ctx.saved_tensors
         causal = ctx.causal

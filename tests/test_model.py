@@ -49,9 +49,7 @@ def test_padding_is_invisible_end_to_end(model, tokenizer):
     pad_id = tokenizer.pad_token_id
     real = torch.randint(0, len(tokenizer), (1, 10), device=DEV)
     pad = 6
-    padded = torch.cat(
-        [torch.full((1, pad), pad_id, device=DEV, dtype=torch.long), real], dim=1
-    )
+    padded = torch.cat([torch.full((1, pad), pad_id, device=DEV, dtype=torch.long), real], dim=1)
 
     a, _ = model(real, torch.zeros(1, dtype=torch.int32, device=DEV))
     b, _ = model(padded, torch.tensor([pad], dtype=torch.int32, device=DEV))
@@ -111,7 +109,9 @@ def test_moe_capacity_drops_only_the_overflow(make_model, tokenizer):
     # Train mode, since only training enforces capacity
     tight = make_model(len(tokenizer), capacity_factor=1.0).train()
     moe_tight = tight.decoder.decoder_layers[0].feedforward
-    moe_loose = make_model(len(tokenizer), capacity_factor=4.0).decoder.decoder_layers[0].feedforward
+    moe_loose = (
+        make_model(len(tokenizer), capacity_factor=4.0).decoder.decoder_layers[0].feedforward
+    )
     moe_loose.load_state_dict(moe_tight.state_dict())
 
     x = torch.randn(2, 16, 64, device=DEV, dtype=torch.float16)
@@ -135,8 +135,11 @@ class _FixedRouter(torch.nn.Module):
         n, e = x.shape[0], self.num_experts
         logits = torch.full((n, e), -10.0, device=x.device, dtype=x.dtype)
         # Collapsed: every token picks the same two experts. Balanced: the pair cycles.
-        first = torch.zeros(n, dtype=torch.long, device=x.device) if self.collapsed \
+        first = (
+            torch.zeros(n, dtype=torch.long, device=x.device)
+            if self.collapsed
             else torch.arange(n, device=x.device) % e
+        )
         rows = torch.arange(n, device=x.device)
         logits[rows, first] = 10.0
         logits[rows, (first + 1) % e] = 9.0
@@ -155,20 +158,32 @@ def test_moe_aux_loss_tracks_imbalance(make_model, tokenizer):
 
     # Perfect balance scores 1.0; full collapse scores num_experts / top_k
     assert balanced == pytest.approx(1.0, abs=0.05), f"balanced routing scored {balanced:.4f}"
-    assert collapsed == pytest.approx(moe.num_experts / moe.top_k, abs=0.05), \
+    assert collapsed == pytest.approx(moe.num_experts / moe.top_k, abs=0.05), (
         f"collapsed routing scored {collapsed:.4f}"
+    )
     assert collapsed > balanced
 
 
 def test_padding_content_cannot_reach_real_tokens(make_model, tokenizer):
     """With the mask, what sits in the pad slots cannot affect the real tokens, at any position."""
-    moe = make_model(len(tokenizer), capacity_factor=1.0).train().decoder.decoder_layers[0].feedforward
+    moe = (
+        make_model(len(tokenizer), capacity_factor=1.0)
+        .train()
+        .decoder.decoder_layers[0]
+        .feedforward
+    )
     real = torch.randn(1, 24, 64, device=DEV, dtype=torch.float16)
     mask = torch.zeros(1, 64, dtype=torch.bool, device=DEV)
     mask[:, :24] = True
 
-    a, aux_a = moe(torch.cat([real, torch.randn(1, 40, 64, device=DEV, dtype=torch.float16)], 1), padding_mask=mask)
-    b, aux_b = moe(torch.cat([real, torch.zeros(1, 40, 64, device=DEV, dtype=torch.float16)], 1), padding_mask=mask)
+    a, aux_a = moe(
+        torch.cat([real, torch.randn(1, 40, 64, device=DEV, dtype=torch.float16)], 1),
+        padding_mask=mask,
+    )
+    b, aux_b = moe(
+        torch.cat([real, torch.zeros(1, 40, 64, device=DEV, dtype=torch.float16)], 1),
+        padding_mask=mask,
+    )
 
     err = (a[0, :24].float() - b[0, :24].float()).abs().max().item()
     assert err == 0.0, f"padding content perturbed real tokens by {err:.3e}"
@@ -193,12 +208,17 @@ def test_padding_is_invisible_when_capacity_cannot_bind(make_model, tokenizer):
 
 def test_unmasked_padding_does_perturb_real_tokens(make_model, tokenizer):
     """The converse, so the tests above cannot pass for the wrong reason."""
-    moe = make_model(len(tokenizer), capacity_factor=1.0).train().decoder.decoder_layers[0].feedforward
+    moe = (
+        make_model(len(tokenizer), capacity_factor=1.0)
+        .train()
+        .decoder.decoder_layers[0]
+        .feedforward
+    )
     real = torch.randn(1, 24, 64, device=DEV, dtype=torch.float16)
     padded = torch.cat([real, torch.randn(1, 40, 64, device=DEV, dtype=torch.float16)], dim=1)
 
     plain, _ = moe(real)
-    unmasked, _ = moe(padded)                      # no mask: padding competes for capacity
+    unmasked, _ = moe(padded)  # no mask: padding competes for capacity
 
     err = (unmasked[0, :24].float() - plain[0].float()).abs().max().item()
     assert err > 0.0, "expected unmasked padding to contend for expert capacity"

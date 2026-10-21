@@ -1,14 +1,16 @@
-from torch.utils.data import DataLoader
-import torch
-from torch.utils.data.sampler import Sampler
-import numpy as np
 import random
-from functools import partial
 from collections.abc import Iterator, Mapping, Sized
+from functools import partial
 from typing import Any
+
 import datasets as hf_datasets
+import numpy as np
+import torch
 from torch import Tensor
+from torch.utils.data import DataLoader
+from torch.utils.data.sampler import Sampler
 from transformers import PreTrainedTokenizerFast
+
 from src.data import TokenizedDataset
 from src.utils import Config
 
@@ -139,8 +141,7 @@ def _reshuffled_forever(batches: list[list[int]], seed: int, skip: int) -> Itera
         if skip >= len(order):
             skip -= len(order)
             continue
-        for batch in order[skip:]:
-            yield batch
+        yield from order[skip:]
         skip = 0
 
 
@@ -293,7 +294,5 @@ def resume_at_minibatch(dataloader: DataLoader, n_minibatches: int) -> None:
     """
     sampler = dataloader.batch_sampler if dataloader.batch_size is None else dataloader.sampler
     if not hasattr(sampler, "start_minibatch"):
-        raise TypeError(
-            f"cannot resume a {type(sampler).__name__}: it has no start_minibatch"
-        )
+        raise TypeError(f"cannot resume a {type(sampler).__name__}: it has no start_minibatch")
     sampler.start_minibatch = n_minibatches

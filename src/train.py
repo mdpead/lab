@@ -1,20 +1,21 @@
-import torch
-from torch import nn
-from torch.optim.lr_scheduler import LRScheduler
-import logging
-import time
-from torch.optim import Optimizer
-from torch import amp
-import os
 import itertools
 import json
+import logging
+import os
+import time
 from collections.abc import Callable
 from typing import Any, NotRequired, TypedDict
+
+import torch
+from torch import amp, nn
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
+
 from src import utils
-from src.model import Transformer
 from src.dataloader import resume_at_minibatch
+from src.model import Transformer
 
 
 class Run(TypedDict):
@@ -108,16 +109,13 @@ def validation_step(
     num_batches = 0
 
     for minibatch in itertools.islice(dataloader, validation_minibatches):
-
         minibatch = {
             k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
             for k, v in minibatch.items()
         }
 
         with torch.no_grad():
-            logits, loss_aux = model(
-                minibatch["input_ids"], padding_mask=minibatch["padding_mask"]
-            )
+            logits, loss_aux = model(minibatch["input_ids"], padding_mask=minibatch["padding_mask"])
             loss = criterion(
                 logits.reshape(-1, logits.shape[2]), minibatch["output_ids"].reshape(-1)
             )
@@ -180,7 +178,6 @@ def train_loop(
 
     model.train()
     for accum_idx, batch in enumerate(dataloaders["train"]):
-
         # Move batch to device
         batch = {
             k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
@@ -188,11 +185,8 @@ def train_loop(
         }
 
         with amp.autocast(device_type=device.type):
-
             # The mask keeps pad tokens out of the MoE's seat assignment
-            logits, loss_aux = model(
-                batch["input_ids"], padding_mask=batch["padding_mask"]
-            )
+            logits, loss_aux = model(batch["input_ids"], padding_mask=batch["padding_mask"])
             loss_ce = criterion(
                 logits.reshape(-1, logits.shape[2]), batch["output_ids"].reshape(-1)
             )
@@ -306,9 +300,7 @@ def _prune_checkpoints(checkpoints_path: str, keep: int | None) -> None:
     for step in steps[:-keep]:
         os.remove(f"{checkpoints_path}/{step}.pt")
     if len(steps) > keep:
-        logging.info(
-            f"Pruned {len(steps) - keep} checkpoint(s), keeping steps {steps[-keep:]}"
-        )
+        logging.info(f"Pruned {len(steps) - keep} checkpoint(s), keeping steps {steps[-keep:]}")
 
 
 def save_checkpoint(

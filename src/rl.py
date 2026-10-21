@@ -1,17 +1,16 @@
-import torch
-import torch.nn.functional as F
-from torch import amp
 import logging
 import time
 from typing import Any
 
-from torch import Tensor, nn
+import torch
+import torch.nn.functional as F
+from torch import Tensor, amp
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
-from src import train, generation, synth
-from src.model import Transformer
+from src import generation, synth, train
 from src.dataloader import resume_at_minibatch
+from src.model import Transformer
 from src.utils import Config
 
 # One generation minibatch's rollouts:
@@ -122,9 +121,7 @@ def validation_step(
     }
 
 
-def token_budget_chunks(
-    starts: list[int], ends: list[int], budget: int | None
-) -> list[list[int]]:
+def token_budget_chunks(starts: list[int], ends: list[int], budget: int | None) -> list[list[int]]:
     """Split rows into chunks whose padded size, rows x width, fits `budget` tokens.
 
     `starts` and `ends` are each row's first real column and one past its last. Rollout
@@ -341,7 +338,6 @@ def train_loop(
 
     model.train()
     for minibatch_idx, batch in enumerate(dataloaders["train"]):
-
         # One row per rollout, each prompt's group contiguous for the reshape below
         rows = [row for row in batch for _ in range(completions_per_prompt)]
         prompts = [row["prompt"] for row in rows]

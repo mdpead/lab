@@ -7,4 +7,5 @@ numpy==2.4.6
 PyYAML==6.0.3
 datasets==5.0.0
 pytest==9.1.1
+ruff==0.17.1
 ipykernel==7.3.0

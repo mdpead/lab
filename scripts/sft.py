@@ -3,8 +3,9 @@ import os
 # Set before torch loads. Varying batch shapes fragment the allocator until the card overflows.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-from src import data, model, tokenizer, train, utils, dataloader
 import logging
+
+from src import data, dataloader, model, tokenizer, train, utils
 
 
 # Supervised fine-tuning on synth tasks: prompt in, trace and answer out, loss on the completion
@@ -22,7 +23,7 @@ def main() -> None:
 
     ds = data.prepare_sft(ds_raw, token, config)
 
-    logging.info(f"sft rows: {  {split: len(rows) for split, rows in ds.items()} }")
+    logging.info(f"sft rows: { {split: len(rows) for split, rows in ds.items()} }")
 
     transformer = model.build_transformer(config)
 

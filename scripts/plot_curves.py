@@ -87,14 +87,17 @@ class Panel:
         for value in y_ticks:
             y = self.py(value)
             parts.append(
-                f'<line class="grid" x1="{self.x}" y1="{y:.1f}" x2="{self.x + self.w}" y2="{y:.1f}"/>'
+                f'<line class="grid" x1="{self.x}" y1="{y:.1f}" '
+                f'x2="{self.x + self.w}" y2="{y:.1f}"/>'
             )
             parts.append(
                 f'<text class="tick" x="{self.x - 8}" y="{y + 4:.1f}" '
                 f'text-anchor="end">{y_format(value)}</text>'
             )
         base = self.y + self.h
-        parts.append(f'<line class="axis" x1="{self.x}" y1="{base}" x2="{self.x + self.w}" y2="{base}"/>')
+        parts.append(
+            f'<line class="axis" x1="{self.x}" y1="{base}" x2="{self.x + self.w}" y2="{base}"/>'
+        )
         for step in x_ticks:
             parts.append(
                 f'<text class="tick" x="{self.px(step):.1f}" y="{base + 18}" '
@@ -106,8 +109,9 @@ class Panel:
         )
         if y_label:
             parts.append(
-                f'<text class="label" transform="translate({self.x - 50} {self.y + self.h / 2:.1f}) '
-                f'rotate(-90)" text-anchor="middle">{y_label}</text>'
+                f'<text class="label" '
+                f'transform="translate({self.x - 50} {self.y + self.h / 2:.1f}) rotate(-90)" '
+                f'text-anchor="middle">{y_label}</text>'
             )
         return parts
 
@@ -135,18 +139,21 @@ class Panel:
 
 
 def svg(width: int, height: int, title: str, desc: str, body: list[str]) -> str:
-    return "\n".join(
-        [
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-            f'width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
-            f'<title id="title">{title}</title>',
-            f'<desc id="desc">{desc}</desc>',
-            f"<style>{STYLE}</style>",
-            f'<rect class="surface" width="{width}" height="{height}" rx="8"/>',
-            *body,
-            "</svg>",
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                f'width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
+                f'<title id="title">{title}</title>',
+                f'<desc id="desc">{desc}</desc>',
+                f"<style>{STYLE}</style>",
+                f'<rect class="surface" width="{width}" height="{height}" rx="8"/>',
+                *body,
+                "</svg>",
+            ]
+        )
+        + "\n"
+    )
 
 
 def sft_curves() -> str:
@@ -163,7 +170,9 @@ def sft_curves() -> str:
     ]
     legend_x = panel.x
     for _, name, cls in runs:
-        body.append(f'<line class="line {cls}" x1="{legend_x}" y1="72" x2="{legend_x + 18}" y2="72"/>')
+        body.append(
+            f'<line class="line {cls}" x1="{legend_x}" y1="72" x2="{legend_x + 18}" y2="72"/>'
+        )
         body.append(f'<text class="label" x="{legend_x + 24}" y="76">{name}</text>')
         legend_x += 24 + 7 * len(name) + 24
     body += panel.axes(
@@ -174,7 +183,9 @@ def sft_curves() -> str:
         "Validation loss, log scale",
     )
     for run, name, cls in runs:
-        body += panel.series(validation(run, "sft", "loss_ce"), cls, name, lambda v: f"{v:.4f}", name)
+        body += panel.series(
+            validation(run, "sft", "loss_ce"), cls, name, lambda v: f"{v:.4f}", name
+        )
     return svg(
         720,
         420,
@@ -208,7 +219,9 @@ def pipeline() -> str:
     body += pretrain.series(
         validation("base", "pretrain", "loss_ce"), "s1", "Pretrain", lambda v: f"{v:.3f}"
     )
-    body += sft.axes((0.005, 0.01, 0.02, 0.05, 0.1, 0.2), lambda v: f"{v:g}", (0, 5000, 10000), "SFT step", None)
+    body += sft.axes(
+        (0.005, 0.01, 0.02, 0.05, 0.1, 0.2), lambda v: f"{v:g}", (0, 5000, 10000), "SFT step", None
+    )
     body += sft.series(validation("base_lr3", "sft", "loss_ce"), "s1", "SFT", lambda v: f"{v:.4f}")
     body += rl.axes((0.80, 0.85, 0.90, 0.95), lambda v: f"{v:.0%}", (0, 50, 100), "RL step", None)
     body += rl.series(validation("base_lr3", "rl", "pass_rate"), "s1", "RL", lambda v: f"{v:.1%}")

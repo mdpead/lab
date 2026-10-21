@@ -1,5 +1,6 @@
-from src import data, tokenizer, utils
 import logging
+
+from src import data, tokenizer, utils
 
 
 # Train the BPE tokenizer on the pretrain corpus. Later stages load it from the run

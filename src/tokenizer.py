@@ -1,9 +1,11 @@
-import os
 import itertools
+import os
 from typing import Any
+
 from datasets import Dataset
-from tokenizers import Tokenizer, models, pre_tokenizers, trainers, processors, decoders
+from tokenizers import Tokenizer, decoders, models, pre_tokenizers, processors, trainers
 from transformers import PreTrainedTokenizerFast
+
 from src import data, utils
 
 
@@ -26,9 +28,14 @@ def create_tokenizer(
     # Reasoning and answer delimiters, pipe-guarded so they can't collide with Python reprs.
     # Reserved with spare slots: the vocabulary is fixed once pretraining starts.
     special_tokens = [
-        "<bos>", "<eos>", "<pad>", "<unk>",
-        "<|think|>", "<|/think|>",
-        "<|answer|>", "<|/answer|>",
+        "<bos>",
+        "<eos>",
+        "<pad>",
+        "<unk>",
+        "<|think|>",
+        "<|/think|>",
+        "<|answer|>",
+        "<|/answer|>",
         *[f"<|reserved_{i}|>" for i in range(16)],
     ]
     trainer = trainers.BpeTrainer(

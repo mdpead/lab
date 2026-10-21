@@ -27,9 +27,15 @@ LIST_VARS = ["xs", "ys"]
 # trace tokens are the budget that matters, and RL needs headroom above it.
 TIERS: dict[str, dict[str, Any]] = {
     # max_depth 0 is straight-line code, which a freshly pretrained model can do
-    "easy": dict(n_stmts=(3, 5), max_depth=0, n_ints=2, n_lists=0, loop_range=(2, 3), max_executed=25),
-    "medium": dict(n_stmts=(4, 7), max_depth=1, n_ints=2, n_lists=1, loop_range=(2, 4), max_executed=45),
-    "hard": dict(n_stmts=(6, 10), max_depth=2, n_ints=3, n_lists=2, loop_range=(2, 5), max_executed=70),
+    "easy": dict(
+        n_stmts=(3, 5), max_depth=0, n_ints=2, n_lists=0, loop_range=(2, 3), max_executed=25
+    ),
+    "medium": dict(
+        n_stmts=(4, 7), max_depth=1, n_ints=2, n_lists=1, loop_range=(2, 4), max_executed=45
+    ),
+    "hard": dict(
+        n_stmts=(6, 10), max_depth=2, n_ints=3, n_lists=2, loop_range=(2, 5), max_executed=70
+    ),
 }
 
 
@@ -379,9 +385,7 @@ def format_search_task(record: Record, include_trace: bool) -> tuple[str, str]:
     return prompt, f"{THINK_OPEN}{body}{THINK_CLOSE}{completion}"
 
 
-_TRY_LINE = re.compile(
-    rf"(?:(?<=\n)|(?<={re.escape(THINK_OPEN)})){re.escape(TRY_PREFIX)}(.*)"
-)
+_TRY_LINE = re.compile(rf"(?:(?<=\n)|(?<={re.escape(THINK_OPEN)})){re.escape(TRY_PREFIX)}(.*)")
 
 
 def miss_argument_spans(completion: str) -> list[tuple[int, int]]:
@@ -464,7 +468,7 @@ def extract_attempts(completion: str) -> list[str]:
 
 def _attempt_args(attempt: str) -> tuple[Any, ...] | None:
     try:
-        return ast.literal_eval(f"({attempt.split(chr(10))[0][len(TRY_PREFIX):]},)")
+        return ast.literal_eval(f"({attempt.split(chr(10))[0][len(TRY_PREFIX) :]},)")
     except (ValueError, SyntaxError):
         return None
 

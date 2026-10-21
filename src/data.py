@@ -14,7 +14,6 @@ from transformers import PreTrainedTokenizerFast
 from src import synth
 from src.utils import Config
 
-
 # StarCoder prefixes ~48% of files with metadata markers; they don't parse until removed.
 # Anchored to the file start, and needs the newline so marker-only files are left alone.
 _MARKER_PREFIX = re.compile(r"^<(?:reponame|filename|gh_stars)>[^\n]*\n")
@@ -38,9 +37,7 @@ PYTHON_SHARDS = 59
 def _shard_files(num_shards: int) -> list[str]:
     if not 1 <= num_shards <= PYTHON_SHARDS:
         raise ValueError(f"num_shards must be 1..{PYTHON_SHARDS}, got {num_shards}")
-    return [
-        f"python/train-{i:05d}-of-{PYTHON_SHARDS:05d}.parquet" for i in range(num_shards)
-    ]
+    return [f"python/train-{i:05d}-of-{PYTHON_SHARDS:05d}.parquet" for i in range(num_shards)]
 
 
 def get_dataset_pretrain(config: Config) -> dict[str, hf_datasets.Dataset]:
@@ -107,9 +104,7 @@ def _synth_records(
     )
 
 
-def _split_on_source(
-    rows: list[dict[str, Any]], ratio: float
-) -> dict[str, list[dict[str, Any]]]:
+def _split_on_source(rows: list[dict[str, Any]], ratio: float) -> dict[str, list[dict[str, Any]]]:
     """Partition synth rows on the generated function, not the row.
 
     A function appears with several inputs and under several tasks, so a per-row split
@@ -245,9 +240,7 @@ def prepare_sft(
         )
     dropped = len(ds_raw) - len(prepared)
     if dropped:
-        logging.warning(
-            f"sft: dropped {dropped}/{len(ds_raw)} rows over max_length {max_length}"
-        )
+        logging.warning(f"sft: dropped {dropped}/{len(ds_raw)} rows over max_length {max_length}")
 
     # Split here rather than at generation, so nothing has to be buffered
     return {

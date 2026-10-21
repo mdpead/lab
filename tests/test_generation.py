@@ -74,9 +74,7 @@ def test_other_special_tokens_survive_generation(model, tokenizer):
     marker = "<|think|>"
     assert len(tokenizer(marker, add_special_tokens=False)["input_ids"]) == 1
 
-    texts, _ = generate_texts(
-        model, tokenizer, [f"hello {marker} world"], DEV, max_new_tokens=3
-    )
+    texts, _ = generate_texts(model, tokenizer, [f"hello {marker} world"], DEV, max_new_tokens=3)
     assert marker in texts[0]
 
 
