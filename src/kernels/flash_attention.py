@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 
 import triton
@@ -6,7 +8,7 @@ import triton.language as tl
 from torch import Tensor
 
 
-def _length_bucket(length):
+def _length_bucket(length: int) -> int:
     """The next power of two at or above `length`, which autotune keys on."""
     return 1 << (length - 1).bit_length()
 
@@ -951,14 +953,18 @@ def flash_attention_backward(
 
 class FlashAttentionFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q: Tensor, k: Tensor, v: Tensor, seq_starts: Tensor, causal: bool):
+    def forward(
+        ctx: Any, q: Tensor, k: Tensor, v: Tensor, seq_starts: Tensor, causal: bool
+    ) -> Tensor:
         o, l = flash_attention_forward(q, k, v, seq_starts, causal)
         ctx.save_for_backward(q, k, v, o, l, seq_starts)
         ctx.causal = causal
         return o
 
     @staticmethod
-    def backward(ctx, *grad_outputs):
+    def backward(
+        ctx: Any, *grad_outputs: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, None, None]:
         (do,) = grad_outputs
         q, k, v, o, l, seq_starts = ctx.saved_tensors
         causal = ctx.causal
@@ -966,5 +972,7 @@ class FlashAttentionFunction(torch.autograd.Function):
         return dq, dk, dv, None, None
 
 
-def flash_attention(q: Tensor, k: Tensor, v: Tensor, seq_starts: Tensor, causal: bool = False):
+def flash_attention(
+    q: Tensor, k: Tensor, v: Tensor, seq_starts: Tensor, causal: bool = False
+) -> Tensor:
     return FlashAttentionFunction.apply(q, k, v, seq_starts, causal)

@@ -4,16 +4,17 @@ import math
 from src.kernels import flash_attention
 from torch.nn import functional as F
 from torch import Tensor
+from src.utils import Config
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, d_model, d_ff):
+    def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
         self.linear1 = nn.Linear(d_model, d_ff, bias=False)
         self.linear2 = nn.Linear(d_ff, d_model, bias=False)
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         x = self.linear1(x)
         x = self.relu(x)
         x = self.linear2(x)
@@ -21,13 +22,13 @@ class PositionWiseFeedForward(nn.Module):
 
 
 class SwiGLUFeedForward(nn.Module):
-    def __init__(self, d_model, d_ff):
+    def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
         self.gate = nn.Linear(d_model, d_ff, bias=False)
         self.up = nn.Linear(d_model, d_ff, bias=False)
         self.down = nn.Linear(d_ff, d_model, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         g = F.silu(self.gate(x))
         u = self.up(x)
         u_g = g * u
@@ -36,7 +37,9 @@ class SwiGLUFeedForward(nn.Module):
 
 
 class MixtureOfExpertsFeedForward(nn.Module):
-    def __init__(self, d_model, d_ff, num_experts, top_k, capacity_factor):
+    def __init__(
+        self, d_model: int, d_ff: int, num_experts: int, top_k: int, capacity_factor: float
+    ) -> None:
         super().__init__()
         self.num_experts = num_experts
         self.top_k = top_k
@@ -48,7 +51,7 @@ class MixtureOfExpertsFeedForward(nn.Module):
             [SwiGLUFeedForward(d_model, d_ff) for _ in range(0, num_experts)]
         )
 
-    def forward(self, x, padding_mask=None):
+    def forward(self, x: Tensor, padding_mask: Tensor | None = None) -> tuple[Tensor, Tensor]:
 
         n, d = x.shape[0] * x.shape[1], x.shape[-1]
 
@@ -114,12 +117,12 @@ class MixtureOfExpertsFeedForward(nn.Module):
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, d_model, eps=1e-6):
+    def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(d_model))
         self.eps = eps
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         x_prec = x.to(torch.float32)
         ms = (x_prec**2).mean(-1, keepdim=True)
         x_scaled = x_prec * torch.rsqrt(ms + self.eps)
@@ -129,7 +132,14 @@ class RMSNorm(nn.Module):
 
 
 class GroupedQueryAttention(nn.Module):
-    def __init__(self, d_model, num_heads, num_kv_heads, d_h, rope_layer):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        num_kv_heads: int,
+        d_h: int,
+        rope_layer: "RotaryPositionalEncoding",
+    ) -> None:
         super().__init__()
         assert num_heads % num_kv_heads == 0
         self.num_heads = num_heads
@@ -140,7 +150,9 @@ class GroupedQueryAttention(nn.Module):
 
         self.rope = rope_layer
 
-    def forward(self, x: Tensor, seq_starts: Tensor, kv_cache: Tensor | None = None):
+    def forward(
+        self, x: Tensor, seq_starts: Tensor, kv_cache: Tensor | None = None
+    ) -> tuple[Tensor, Tensor | None]:
 
         # Create Q, K, V tensors in a fused manner
         qkv = self.qkv_proj(x)  # (batch, seq, (num_heads + 2 * num_kv_heads) * d_h)
@@ -186,14 +198,14 @@ class GroupedQueryAttention(nn.Module):
 
 
 class RotaryPositionalEncoding(nn.Module):
-    def __init__(self, d_h, max_length):
+    def __init__(self, d_h: int, max_length: int) -> None:
         super().__init__()
         cos_thetas, sin_thetas = self.create_ang_trigs(d_h, max_length)
         self.register_buffer("cos_thetas", cos_thetas, persistent=False)
         self.register_buffer("sin_thetas", sin_thetas, persistent=False)
 
     @staticmethod
-    def create_ang_trigs(d_h, max_length):
+    def create_ang_trigs(d_h: int, max_length: int) -> tuple[Tensor, Tensor]:
         base = 10000
 
         ws = []
@@ -213,7 +225,7 @@ class RotaryPositionalEncoding(nn.Module):
         return cos_thetas, sin_thetas
 
     @staticmethod
-    def rotate(x, cos_thetas, sin_thetas):
+    def rotate(x: Tensor, cos_thetas: Tensor, sin_thetas: Tensor) -> Tensor:
         cos_thetas = cos_thetas.to(x.dtype)
         sin_thetas = sin_thetas.to(x.dtype)
 
@@ -229,7 +241,7 @@ class RotaryPositionalEncoding(nn.Module):
 
         return out
 
-    def forward(self, Q, K, offset):
+    def forward(self, Q: Tensor, K: Tensor, offset: int) -> tuple[Tensor, Tensor]:
 
         seq_length = Q.shape[-2]
 
@@ -249,12 +261,12 @@ class RotaryPositionalEncoding(nn.Module):
 
 
 class Embedding(nn.Module):
-    def __init__(self, vocab_size, d_model):
+    def __init__(self, vocab_size: int, d_model: int) -> None:
         super().__init__()
         self.E = nn.Parameter(torch.randn(vocab_size, d_model) * 0.02)
         self.d_model = d_model
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         x = self.E[x] * math.sqrt(self.d_model)
         return x
 
@@ -262,17 +274,17 @@ class Embedding(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(
         self,
-        d_model,
-        num_heads,
-        num_kv_heads,
-        d_h,
-        d_ff,
-        num_experts,
-        top_k,
-        capacity_factor,
-        dropout,
-        rope_layer,
-    ):
+        d_model: int,
+        num_heads: int,
+        num_kv_heads: int,
+        d_h: int,
+        d_ff: int,
+        num_experts: int,
+        top_k: int,
+        capacity_factor: float,
+        dropout: float,
+        rope_layer: RotaryPositionalEncoding,
+    ) -> None:
         super().__init__()
         self.attention = GroupedQueryAttention(d_model, num_heads, num_kv_heads, d_h, rope_layer)
         self.feedforward = MixtureOfExpertsFeedForward(
@@ -287,7 +299,7 @@ class DecoderLayer(nn.Module):
         seq_starts: Tensor,
         kv_cache: Tensor | None = None,
         padding_mask: Tensor | None = None,
-    ):
+    ) -> tuple[Tensor, Tensor, Tensor | None]:
         attn_out, new_kv = self.attention(self.layer_norms[0](x), seq_starts, kv_cache)
         x = x + self.dropout(attn_out)
         ff_out, loss_aux = self.feedforward(self.layer_norms[1](x), padding_mask)
@@ -298,18 +310,18 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(
         self,
-        d_model,
-        num_heads,
-        num_kv_heads,
-        d_h,
-        d_ff,
-        num_experts,
-        top_k,
-        capacity_factor,
-        num_dec_layers,
-        dropout,
-        max_length,
-    ):
+        d_model: int,
+        num_heads: int,
+        num_kv_heads: int,
+        d_h: int,
+        d_ff: int,
+        num_experts: int,
+        top_k: int,
+        capacity_factor: float,
+        num_dec_layers: int,
+        dropout: float,
+        max_length: int,
+    ) -> None:
         super().__init__()
         self.rope_layer = RotaryPositionalEncoding(d_h, max_length)
         self.decoder_layers = nn.ModuleList(
@@ -337,7 +349,7 @@ class Decoder(nn.Module):
         seq_starts: Tensor,
         kv_cache: Tensor | None = None,
         padding_mask: Tensor | None = None,
-    ):
+    ) -> tuple[Tensor, Tensor, Tensor | None]:
         loss_aux_sum = 0
         new_kvs = []
         for i, layer in enumerate(self.decoder_layers):
@@ -355,19 +367,19 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        d_model,
-        num_heads,
-        num_kv_heads,
-        d_h,
-        d_ff,
-        num_experts,
-        top_k,
-        capacity_factor,
-        num_layers,
-        vocab_size,
-        max_length,
-        dropout,
-    ):
+        d_model: int,
+        num_heads: int,
+        num_kv_heads: int,
+        d_h: int,
+        d_ff: int,
+        num_experts: int,
+        top_k: int,
+        capacity_factor: float,
+        num_layers: int,
+        vocab_size: int,
+        max_length: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
         self.max_length = max_length  # context bound: RoPE table size and training seq length
         self.num_kv_heads = num_kv_heads
@@ -396,7 +408,7 @@ class Transformer(nn.Module):
         kv_cache: Tensor | None = None,
         padding_mask: Tensor | None = None,
         output_mask: Tensor | None = None,
-    ):
+    ) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor | None]:
         """`output_mask` is (batch, seq) bool: project only those positions to the vocabulary.
 
         The logits then come back as (selected, vocab) in row-major order, which avoids
@@ -417,7 +429,7 @@ class Transformer(nn.Module):
         return out, loss_aux, new_kv
 
 
-def init_weights(m):
+def init_weights(m: nn.Module) -> None:
     if isinstance(m, nn.Linear):
         nn.init.xavier_uniform_(m.weight)
         if m.bias is not None:
@@ -426,7 +438,7 @@ def init_weights(m):
         nn.init.normal_(m.E, mean=0.0, std=0.02)
 
 
-def build_transformer(config):
+def build_transformer(config: Config) -> Transformer:
 
     model_config = config["model"]
 

@@ -4,33 +4,45 @@ from torch.utils.data.sampler import Sampler
 import numpy as np
 import random
 from functools import partial
+from collections.abc import Iterator, Mapping, Sized
+from typing import Any
+import datasets as hf_datasets
+from torch import Tensor
+from transformers import PreTrainedTokenizerFast
+from src.data import TokenizedDataset
+from src.utils import Config
+
+# Rows a TokenSampler batches: an arrow dataset, or plain dicts for RL prompts
+type Rows = hf_datasets.Dataset | list[dict[str, Any]]
 
 
-class InfiniteRandomSampler(Sampler):
+class InfiniteRandomSampler(Sampler[int]):
     """Endless reshuffled row indices, resumable to an exact position.
 
     `batch_size` is only needed to resume, to convert the loop's minibatch count to rows.
     """
 
-    def __init__(self, data_source, seed, start_index=0, batch_size=None):
+    def __init__(
+        self, data_source: Sized, seed: int, start_index: int = 0, batch_size: int | None = None
+    ) -> None:
         self.n = len(data_source)
         self.seed = seed
         self.start_index = start_index
         self.batch_size = batch_size
 
     @property
-    def start_minibatch(self):
+    def start_minibatch(self) -> int:
         if self.batch_size is None:
             raise ValueError("sampler built without batch_size; cannot resume by minibatch")
         return self.start_index // self.batch_size
 
     @start_minibatch.setter
-    def start_minibatch(self, n):
+    def start_minibatch(self, n: int) -> None:
         if self.batch_size is None:
             raise ValueError("sampler built without batch_size; cannot resume by minibatch")
         self.start_index = n * self.batch_size
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         rng = np.random.default_rng(self.seed)
         # Fast-forward whole epochs without yielding, keeping the RNG in sync
         skip = self.start_index
@@ -46,7 +58,7 @@ class InfiniteRandomSampler(Sampler):
             yield from (int(i) for i in order)
 
 
-class TokenSampler(Sampler):
+class TokenSampler(Sampler[list[int]]):
     """Group rows of similar length into batches that fit a token budget.
 
     A padded batch costs len(batch) * its longest row, so that is what the budget checks.
@@ -55,13 +67,15 @@ class TokenSampler(Sampler):
     whose inherited __len__ would fail confusingly.
     """
 
-    def __init__(self, ds, token_batch_size, seed, start_minibatch=0):
+    def __init__(
+        self, ds: Rows, token_batch_size: int | None, seed: int, start_minibatch: int = 0
+    ) -> None:
         self.token_batch_size = token_batch_size
         self.seed = seed
         self.start_minibatch = start_minibatch
         self.batches = self.generate_batches(ds)
 
-    def generate_batches(self, ds):
+    def generate_batches(self, ds: Rows) -> list[list[int]]:
         # Read `length` as a whole column when the dataset has one; row access on arrow is slow.
         # Plain lists of dicts fall back to rows.
         if hasattr(ds, "column_names"):
@@ -71,8 +85,8 @@ class TokenSampler(Sampler):
 
         order = sorted(range(len(lengths)), key=lengths.__getitem__)
 
-        batches = []
-        batch = []
+        batches: list[list[int]] = []
+        batch: list[int] = []
         longest = 0
         for idx in order:
             length = lengths[idx]
@@ -87,7 +101,7 @@ class TokenSampler(Sampler):
 
         return batches
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[list[int]]:
         return _reshuffled_forever(self.batches, self.seed, self.start_minibatch)
 
 
@@ -100,12 +114,14 @@ class PromptSampler(TokenSampler):
     the same longest prompts.
     """
 
-    def __init__(self, ds, prompts_per_batch, seed, start_minibatch=0):
+    def __init__(
+        self, ds: Rows, prompts_per_batch: int, seed: int, start_minibatch: int = 0
+    ) -> None:
         self.prompts_per_batch = prompts_per_batch
         # No token budget: generate_batches below replaces the rule that reads it
         super().__init__(ds, None, seed, start_minibatch)
 
-    def generate_batches(self, ds):
+    def generate_batches(self, ds: Rows) -> list[list[int]]:
         lengths = [row["length"] for row in ds]
         order = sorted(range(len(lengths)), key=lengths.__getitem__)
         return [
@@ -114,7 +130,7 @@ class PromptSampler(TokenSampler):
         ]
 
 
-def _reshuffled_forever(batches, seed, skip):
+def _reshuffled_forever(batches: list[list[int]], seed: int, skip: int) -> Iterator[list[int]]:
     """Yield batches forever, reshuffling each pass, resuming `skip` batches in."""
     rng = random.Random(seed)
     while True:
@@ -128,12 +144,12 @@ def _reshuffled_forever(batches, seed, skip):
         skip = 0
 
 
-def collate_rl_batch(batch):
+def collate_rl_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Hand the rows straight through: generate() tokenises, and scoring needs the whole row."""
     return batch
 
 
-def collate_sft_batch(batch, pad_token_id):
+def collate_sft_batch(batch: list[dict[str, Any]], pad_token_id: int) -> dict[str, Tensor]:
     """Pad to the batch maximum and mask the prompt, and any unscored spans, out of the targets.
 
     Masked positions are overwritten in output_ids only, so the model still reads them.
@@ -160,7 +176,7 @@ def collate_sft_batch(batch, pad_token_id):
     }
 
 
-def collate_lm_batch(batch, pad_token_id):
+def collate_lm_batch(batch: list[Tensor], pad_token_id: int) -> dict[str, Tensor]:
     input_ids = torch.stack(batch)
     padding_mask = (input_ids != pad_token_id).bool()
     return {
@@ -172,10 +188,10 @@ def collate_lm_batch(batch, pad_token_id):
 
 
 def create_dataloaders_pretrain(
-    ds,
-    tokenizer,
-    config,
-):
+    ds: Mapping[str, TokenizedDataset],
+    tokenizer: PreTrainedTokenizerFast,
+    config: Config,
+) -> dict[str, DataLoader]:
 
     train_config = config["train"]["pretrain"]
     num_workers = train_config.get("num_workers", 0)
@@ -206,10 +222,10 @@ def create_dataloaders_pretrain(
 
 
 def create_dataloaders_sft(
-    ds,
-    tokenizer,
-    config,
-):
+    ds: dict[str, hf_datasets.Dataset],
+    tokenizer: PreTrainedTokenizerFast,
+    config: Config,
+) -> dict[str, DataLoader]:
 
     train_config = config["train"]["sft"]
     num_workers = train_config.get("num_workers", 0)
@@ -233,10 +249,10 @@ def create_dataloaders_sft(
 
 
 def create_dataloaders_rl(
-    ds,
-    tokenizer,
-    config,
-):
+    ds: dict[str, list[dict[str, Any]]],
+    tokenizer: PreTrainedTokenizerFast,
+    config: Config,
+) -> dict[str, DataLoader]:
     """Batches of prompt rows for rollout generation.
 
     No workers or pinned memory: rows are plain dicts and generate() does the tokenising.
@@ -244,8 +260,9 @@ def create_dataloaders_rl(
     """
     train_config = config["train"]["rl"]
 
-    dataloaders = {}
+    dataloaders: dict[str, DataLoader] = {}
     for split in ds:
+        batching: dict[str, Any]
         if split == "train":
             batching = {
                 "batch_sampler": PromptSampler(
@@ -268,7 +285,7 @@ def create_dataloaders_rl(
     return dataloaders
 
 
-def resume_at_minibatch(dataloader, n_minibatches):
+def resume_at_minibatch(dataloader: DataLoader, n_minibatches: int) -> None:
     """Fast-forward a train loader past n_minibatches without reading any data.
 
     With a batch_sampler set, DataLoader still builds a plain `.sampler` it never reads,

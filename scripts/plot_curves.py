@@ -1,6 +1,7 @@
 import ast
 import math
 import re
+from collections.abc import Callable, Iterable
 
 # The README's charts, as plain SVG read from the stage logs under models/:
 #   docs/sft_curves.svg  SFT validation loss for the three output-prediction runs
@@ -37,9 +38,9 @@ STYLE = f"""
 """
 
 
-def validation(run, stage, key):
+def validation(run: str, stage: str, key: str) -> dict[int, float]:
     """{step: value} from a stage log, the last record per step where a resume repeated it."""
-    values = {}
+    values: dict[int, float] = {}
     with open(f"models/{run}/{stage}/{stage}.log") as f:
         for line in f:
             match = re.search(r"(\{'type': 'validation'.*\})\s*$", line)
@@ -52,19 +53,36 @@ def validation(run, stage, key):
 class Panel:
     """A plot area at (x, y, w, h) with its own axes. `log` scales y logarithmically."""
 
-    def __init__(self, x, y, w, h, x_max, y_min, y_max, log=False):
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        x_max: float,
+        y_min: float,
+        y_max: float,
+        log: bool = False,
+    ) -> None:
         self.x, self.y, self.w, self.h = x, y, w, h
         self.x_max, self.y_min, self.y_max, self.log = x_max, y_min, y_max, log
 
-    def px(self, step):
+    def px(self, step: float) -> float:
         return self.x + self.w * step / self.x_max
 
-    def py(self, value):
-        scale = math.log10 if self.log else (lambda v: v)
+    def py(self, value: float) -> float:
+        scale: Callable[[float], float] = math.log10 if self.log else (lambda v: v)
         span = scale(self.y_max) - scale(self.y_min)
         return self.y + self.h * (scale(self.y_max) - scale(value)) / span
 
-    def axes(self, y_ticks, y_format, x_ticks, x_label, y_label):
+    def axes(
+        self,
+        y_ticks: Iterable[float],
+        y_format: Callable[[float], str],
+        x_ticks: Iterable[int],
+        x_label: str,
+        y_label: str | None,
+    ) -> list[str]:
         parts = []
         for value in y_ticks:
             y = self.py(value)
@@ -93,7 +111,14 @@ class Panel:
             )
         return parts
 
-    def series(self, values, cls, name, value_format, label=None):
+    def series(
+        self,
+        values: dict[int, float],
+        cls: str,
+        name: str,
+        value_format: Callable[[float], str],
+        label: str | None = None,
+    ) -> list[str]:
         """A line with an end dot, its final value beside the dot, then an optional label."""
         points = " ".join(f"{self.px(s):.1f},{self.py(v):.1f}" for s, v in values.items())
         last_step, last = list(values.items())[-1]
@@ -109,7 +134,7 @@ class Panel:
         return parts
 
 
-def svg(width, height, title, desc, body):
+def svg(width: int, height: int, title: str, desc: str, body: list[str]) -> str:
     return "\n".join(
         [
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
@@ -124,7 +149,7 @@ def svg(width, height, title, desc, body):
     ) + "\n"
 
 
-def sft_curves():
+def sft_curves() -> str:
     runs = [
         ("base_lr3", "Pretrained, 3e-4", "s1"),
         ("sft_only", "From scratch, 3e-4", "s2"),
@@ -161,7 +186,7 @@ def sft_curves():
     )
 
 
-def pipeline():
+def pipeline() -> str:
     pretrain = Panel(70, 116, 210, 178, 10000, 1.0, 4.0)
     sft = Panel(390, 116, 210, 178, 10000, 0.005, 0.2, log=True)
     rl = Panel(700, 116, 180, 178, 100, 0.80, 0.95)
@@ -199,7 +224,7 @@ def pipeline():
     )
 
 
-def main():
+def main() -> None:
     for path, content in (("docs/sft_curves.svg", sft_curves()), ("docs/pipeline.svg", pipeline())):
         with open(path, "w") as f:
             f.write(content)

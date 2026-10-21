@@ -6,6 +6,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import argparse
 import json
 import logging
+from typing import Any
 
 import torch
 import yaml
@@ -15,10 +16,10 @@ from src import data, generation, model, rl, tokenizer, train, utils
 
 # Greedy pass@1 on a test set larger than RL validation's ~400 prompts.
 # Functions come from a seed no stage trains on; only those on every stage's test side are kept.
-def eval_rows(config, num_records, seed):
+def eval_rows(config: utils.Config, num_records: int, seed: int) -> list[dict[str, Any]]:
     ds_config = {**config["data"]["rl"], "num_records": num_records}
     ratio = min(config["data"]["sft"]["test_split_ratio"], ds_config["test_split_ratio"])
-    rows = []
+    rows: list[dict[str, Any]] = []
     for record in data._synth_records(ds_config, seed, with_trace=False):
         if not data._is_test(record["source"], ratio):
             continue
@@ -37,7 +38,7 @@ def eval_rows(config, num_records, seed):
     return rows
 
 
-def main():
+def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
@@ -64,7 +65,7 @@ def main():
     tok = tokenizer.load_tokenizer(utils.get_run_path(config))
 
     max_new_tokens = config["train"]["rl"]["max_new_tokens"]
-    passed = []
+    passed: list[bool] = []
     for start in range(0, len(rows), args.batch_size):
         batch = rows[start : start + args.batch_size]
         texts, _ = generation.generate_texts(

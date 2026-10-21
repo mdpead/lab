@@ -9,7 +9,7 @@ import logging
 
 # RL on synth tasks: sample rollouts, score by executing them, update on GRPO advantages.
 # See src/rl.py.
-def main():
+def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 

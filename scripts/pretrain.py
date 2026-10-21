@@ -3,7 +3,7 @@ import logging
 
 
 # Everything runs under a __main__ guard, because DataLoader workers re-import this module
-def main():
+def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 

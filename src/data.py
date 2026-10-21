@@ -2,12 +2,17 @@ import hashlib
 import itertools
 import logging
 import re
+from collections.abc import Iterator
+from typing import Any
 
 import datasets as hf_datasets
 import numpy as np
+from torch import Tensor
 from torch.utils.data import Dataset
+from transformers import PreTrainedTokenizerFast
 
 from src import synth
+from src.utils import Config
 
 
 # StarCoder prefixes ~48% of files with metadata markers; they don't parse until removed.
@@ -15,12 +20,12 @@ from src import synth
 _MARKER_PREFIX = re.compile(r"^<(?:reponame|filename|gh_stars)>[^\n]*\n")
 
 
-def strip_markers(text):
+def strip_markers(text: str) -> str:
     """Drop StarCoder's leading metadata line. Also applied when training the tokenizer."""
     return _MARKER_PREFIX.sub("", text, count=1)
 
 
-def _hash_position(text):
+def _hash_position(text: str | None) -> float:
     """Stable position in [0, 1) for a string. blake2b, because hash() is salted per process."""
     digest = hashlib.blake2b((text or "").encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") / 2**64
@@ -30,7 +35,7 @@ def _hash_position(text):
 PYTHON_SHARDS = 59
 
 
-def _shard_files(num_shards):
+def _shard_files(num_shards: int) -> list[str]:
     if not 1 <= num_shards <= PYTHON_SHARDS:
         raise ValueError(f"num_shards must be 1..{PYTHON_SHARDS}, got {num_shards}")
     return [
@@ -38,7 +43,7 @@ def _shard_files(num_shards):
     ]
 
 
-def get_dataset_pretrain(config):
+def get_dataset_pretrain(config: Config) -> dict[str, hf_datasets.Dataset]:
     """Raw StarCoder python files, split by repo. Rows carry a `content` column."""
     ds_config = config["data"]["pretrain"]
 
@@ -65,10 +70,10 @@ def get_dataset_pretrain(config):
     # The realised test fraction only approximates the configured ratio.
     ratio = ds_config["test_split_ratio"]
 
-    def is_test(batch):
+    def is_test(batch: dict[str, list[Any]]) -> list[bool]:
         return [_hash_position(name) < ratio for name in batch["max_stars_repo_name"]]
 
-    def is_train(batch):
+    def is_train(batch: dict[str, list[Any]]) -> list[bool]:
         return [not held_out for held_out in is_test(batch)]
 
     return {
@@ -90,7 +95,9 @@ _TASK_UNSCORED = {
 }
 
 
-def _synth_records(ds_config, seed, with_trace):
+def _synth_records(
+    ds_config: dict[str, Any], seed: int, with_trace: bool
+) -> Iterator[synth.Record]:
     return synth.generate(
         ds_config["num_records"],
         tier=ds_config["tier"],
@@ -100,7 +107,9 @@ def _synth_records(ds_config, seed, with_trace):
     )
 
 
-def _split_on_source(rows, ratio):
+def _split_on_source(
+    rows: list[dict[str, Any]], ratio: float
+) -> dict[str, list[dict[str, Any]]]:
     """Partition synth rows on the generated function, not the row.
 
     A function appears with several inputs and under several tasks, so a per-row split
@@ -112,12 +121,12 @@ def _split_on_source(rows, ratio):
     }
 
 
-def _is_test(source, ratio):
+def _is_test(source: str, ratio: float) -> bool:
     """Which side of the split a generated function falls on. See _split_on_source."""
     return _hash_position(source) < ratio
 
 
-def _sft_rows(config):
+def _sft_rows(config: Config) -> Iterator[dict[str, Any]]:
     """Yield prompt/completion rows from the synth generator, one per (record, task)."""
     ds_config = config["data"]["sft"]
     with_trace = ds_config["with_trace"]
@@ -137,12 +146,12 @@ def _sft_rows(config):
             }
 
 
-def get_dataset_rl(config):
+def get_dataset_rl(config: Config) -> dict[str, list[dict[str, Any]]]:
     """Prompts only, plus the fields synth's checkers need to score a rollout."""
     ds_config = config["data"]["rl"]
 
     # A seed of its own, so these are not the functions sft trained on
-    rows = []
+    rows: list[dict[str, Any]] = []
     for record in _synth_records(ds_config, config["seed"] + 1, with_trace=False):
         for task in ds_config["tasks"]:
             prompt, _ = _TASK_FORMATTERS[task](record, False)
@@ -159,7 +168,7 @@ def get_dataset_rl(config):
     return _split_on_source(rows, ds_config["test_split_ratio"])
 
 
-def get_dataset_sft(config):
+def get_dataset_sft(config: Config) -> hf_datasets.Dataset:
     """Prompt/completion rows from the synth generator, one per (record, task).
 
     Rows carry `is_test` rather than being split here: prepare_sft splits after tokenising,
@@ -168,7 +177,9 @@ def get_dataset_sft(config):
     return hf_datasets.Dataset.from_generator(_sft_rows, gen_kwargs={"config": config})
 
 
-def _tokenise_sft_batch(batch, tokenizer, max_length):
+def _tokenise_sft_batch(
+    batch: dict[str, list[Any]], tokenizer: PreTrainedTokenizerFast, max_length: int
+) -> dict[str, list[Any]]:
     """Map one batch of prompt/completion rows to model-ready sequences.
 
     Returning fewer rows than it was given is how an over-long task is dropped.
@@ -179,7 +190,9 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
     completions = encoded["input_ids"]
 
     carried = ("task", "source", "n_executed", "is_test")
-    out = {k: [] for k in ("ids", "prompt_len", "length", "unscored") + carried}
+    out: dict[str, list[Any]] = {
+        k: [] for k in ("ids", "prompt_len", "length", "unscored") + carried
+    }
     for i, (prompt, completion) in enumerate(zip(prompts, completions)):
         ids = [bos_id] + prompt + completion + [eos_id]
         # One over the context, for the input/target shift. Over-long tasks are dropped.
@@ -206,7 +219,9 @@ def _tokenise_sft_batch(batch, tokenizer, max_length):
     return out
 
 
-def prepare_sft(ds_raw, tokenizer, config):
+def prepare_sft(
+    ds_raw: hf_datasets.Dataset, tokenizer: PreTrainedTokenizerFast, config: Config
+) -> dict[str, hf_datasets.Dataset]:
     """Tokenise prompt/completion pairs into single sequences with a mask boundary.
 
     `prompt_len` is where the completion starts in `ids`; targets before it are masked.
@@ -241,17 +256,20 @@ def prepare_sft(ds_raw, tokenizer, config):
     }
 
 
-def prepare_rl(ds_raw, tokenizer, config):
+def prepare_rl(
+    ds_raw: dict[str, list[dict[str, Any]]], tokenizer: PreTrainedTokenizerFast, config: Config
+) -> dict[str, list[dict[str, Any]]]:
     """Annotate rollout prompts with their token length, for length-bucketed batching.
 
     The prompt stays text, and the reward fields ride along untouched.
     """
     max_length = config["model"]["max_length"]
-    prepared = {}
+    prepared: dict[str, list[dict[str, Any]]] = {}
     for split, rows in ds_raw.items():
         encoded = tokenizer([row["prompt"] for row in rows], add_special_tokens=False)
 
-        kept, dropped = [], 0
+        kept: list[dict[str, Any]] = []
+        dropped = 0
         for row, prompt in zip(rows, encoded["input_ids"]):
             length = 1 + len(prompt)  # +1 for the <bos> generate_texts prepends
             # A prompt that fills the context leaves nothing to generate
@@ -267,7 +285,9 @@ def prepare_rl(ds_raw, tokenizer, config):
     return prepared
 
 
-def _tokenize_and_chunk_batch(batch, tokenizer, max_length):
+def _tokenize_and_chunk_batch(
+    batch: dict[str, list[Any]], tokenizer: PreTrainedTokenizerFast, max_length: int
+) -> dict[str, list[list[int]]]:
     """Tokenise, join with <eos> separators, and cut fixed blocks in one pass.
 
     Blocks are packed across file boundaries, so nothing is spent on padding. The remainder
@@ -284,18 +304,18 @@ def _tokenize_and_chunk_batch(batch, tokenizer, max_length):
     return {"ids": [concatenated[i : i + block] for i in range(0, total, block)]}
 
 
-class TokenizedDataset(Dataset):
-    def __init__(self, ds):
+class TokenizedDataset(Dataset[Tensor]):
+    def __init__(self, ds: hf_datasets.Dataset) -> None:
         self.ds = ds
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.ds)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Tensor:
         return self.ds[idx]["ids"]
 
 
-def _check_token_budget(n_blocks, config):
+def _check_token_budget(n_blocks: int, config: Config) -> None:
     """Report whether the loaded shards cover the configured step budget.
 
     Undersizing does not raise: the sampler loops, so training quietly repeats data.
@@ -319,13 +339,15 @@ def _check_token_budget(n_blocks, config):
         )
 
 
-def prepare_pretrain(ds_raw, tokenizer, config):
+def prepare_pretrain(
+    ds_raw: dict[str, hf_datasets.Dataset], tokenizer: PreTrainedTokenizerFast, config: Config
+) -> dict[str, TokenizedDataset]:
     max_length = config["model"]["max_length"]
 
     # int32 rather than the int64 arrow infers: halves storage for a 32000-token vocabulary
     features = hf_datasets.Features({"ids": hf_datasets.Sequence(hf_datasets.Value("int32"))})
 
-    prepared = {}
+    prepared: dict[str, TokenizedDataset] = {}
     for split, ds in ds_raw.items():
         chunked = ds.map(
             _tokenize_and_chunk_batch,

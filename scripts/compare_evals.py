@@ -1,24 +1,25 @@
 import argparse
 import json
 import random
+from typing import Any
 
 # Pass-rate gap between two evaluate.py runs, with a 95% bootstrap interval over functions.
 # Prompts sharing a function succeed or fail together, so resample functions, not prompts.
 
 
-def load(path):
+def load(path: str) -> dict[str, Any]:
     with open(path) as f:
         return json.load(f)
 
 
-def by_function(result):
-    groups = {}
+def by_function(result: dict[str, Any]) -> list[list[int]]:
+    groups: dict[float, list[int]] = {}
     for i, source in enumerate(result["sources"]):
         groups.setdefault(source, []).append(i)
     return list(groups.values())
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("a", help="evaluate.py result, e.g. models/base_lr3/eval/sft_10000.json")
     parser.add_argument("b", help="the result to compare it against")

@@ -1,11 +1,15 @@
 import os
 import itertools
+from typing import Any
+from datasets import Dataset
 from tokenizers import Tokenizer, models, pre_tokenizers, trainers, processors, decoders
 from transformers import PreTrainedTokenizerFast
 from src import data, utils
 
 
-def create_tokenizer(ds, tokenizer_config):
+def create_tokenizer(
+    ds: dict[str, Dataset], tokenizer_config: dict[str, Any]
+) -> PreTrainedTokenizerFast:
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
 
     # digit_split gives each digit its own token, so arithmetic is learnable.
@@ -55,11 +59,11 @@ def create_tokenizer(ds, tokenizer_config):
     )
 
 
-def save_tokenizer(tokenizer, dir):
+def save_tokenizer(tokenizer: PreTrainedTokenizerFast, dir: str) -> None:
     tokenizer.save_pretrained(f"{dir}/tokenizer")
 
 
-def load_tokenizer(dir):
+def load_tokenizer(dir: str) -> PreTrainedTokenizerFast:
     if not os.path.isdir(f"{dir}/tokenizer"):
         raise FileNotFoundError(
             f"No tokenizer in {dir} — run `python -m scripts.tokenizer` for this config first."
@@ -67,7 +71,7 @@ def load_tokenizer(dir):
     return PreTrainedTokenizerFast.from_pretrained(f"{dir}/tokenizer")
 
 
-def get_tokenizer(ds, config):
+def get_tokenizer(ds: dict[str, Dataset], config: utils.Config) -> PreTrainedTokenizerFast:
     tokenizer_config = config["tokenizer"]
     run_path = utils.get_run_path(config)
     tokenizer_path = f"{run_path}/tokenizer"

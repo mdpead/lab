@@ -7,19 +7,23 @@ import random
 import numpy as np
 import torch
 import yaml
+from typing import Any
+
+# A parsed configs/<name>.yaml
+Config = dict[str, Any]
 
 
-def get_run_path(config):
+def get_run_path(config: Config) -> str:
     """Run-level artifacts shared by every stage: the tokenizer."""
     return f"{config['locations']['models_dir']}/{config['name']}"
 
 
-def get_stage_path(config, stage):
+def get_stage_path(config: Config, stage: str) -> str:
     """Per-stage artifacts: checkpoints, results, and that stage's config snapshot."""
     return f"{get_run_path(config)}/{stage}"
 
 
-def parse_config():
+def parse_config() -> Config:
     """--config <name> -> the parsed configs/<name>.yaml. Shared by the stage scripts."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Config name (e.g. base, test)")
@@ -46,7 +50,7 @@ RESUMABLE_KEYS = {
 }
 
 
-def _stage_fingerprint(config, stage):
+def _stage_fingerprint(config: Config, stage: str) -> dict[str, Any]:
     """The part of a config that this stage's checkpoints depend on.
 
     Scoped to one stage, and stripped of the keys that can change mid-run.
@@ -58,14 +62,14 @@ def _stage_fingerprint(config, stage):
     return fingerprint
 
 
-def set_seed(seed):
+def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
 
-def _start_file_log(stage_path, stage, cleared):
+def _start_file_log(stage_path: str, stage: str, cleared: bool) -> str:
     """Tee the root logger into the stage directory, with timestamps, in append mode."""
     log_path = f"{stage_path}/{stage}.log"
     handler = logging.FileHandler(log_path)
@@ -78,7 +82,7 @@ def _start_file_log(stage_path, stage, cleared):
     return log_path
 
 
-def init_run_dir(config):
+def init_run_dir(config: Config) -> str:
     """Prepare the run directory, clearing the tokenizer if its config moved."""
     set_seed(config["seed"])
     run_path = get_run_path(config)
@@ -95,7 +99,7 @@ def init_run_dir(config):
     return run_path
 
 
-def init_run(config, stage):
+def init_run(config: Config, stage: str) -> str:
     """Prepare this stage's directory, clearing it if the config it depends on moved."""
     init_run_dir(config)
     stage_path = get_stage_path(config, stage)
@@ -116,13 +120,13 @@ def init_run(config, stage):
     return stage_path
 
 
-def save_config(run_path, config):
+def save_config(run_path: str, config: Config) -> str:
     filepath = f"{run_path}/config.json"
     json.dump(config, open(filepath, "w"))
     return filepath
 
 
-def load_config(run_path):
+def load_config(run_path: str) -> Config:
     filepath = f"{run_path}/config.json"
     with open(filepath) as f:
         config = json.load(f)

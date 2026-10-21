@@ -8,7 +8,7 @@ import logging
 
 
 # Supervised fine-tuning on synth tasks: prompt in, trace and answer out, loss on the completion
-def main():
+def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 

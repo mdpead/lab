@@ -8,8 +8,32 @@ from torch import amp
 import os
 import itertools
 import json
+from collections.abc import Callable
+from typing import Any, NotRequired, TypedDict
+from torch.utils.data import DataLoader
+from transformers import PreTrainedTokenizerFast
 from src import utils
+from src.model import Transformer
 from src.dataloader import resume_at_minibatch
+
+
+class Run(TypedDict):
+    """A stage's training state, fresh from create_run or resumed by load_run."""
+
+    model: Transformer
+    criterion: nn.CrossEntropyLoss
+    optimiser: Optimizer
+    lr_scheduler: LRScheduler
+    scaler: amp.GradScaler
+    results: list[dict[str, Any]]
+    step_no: int
+    run_path: NotRequired[str]
+
+
+# A stage's training loop, as train() calls it
+TrainLoop = Callable[
+    [str, Transformer, dict[str, DataLoader], PreTrainedTokenizerFast, Run, utils.Config], None
+]
 
 
 class WarmupInverseSquareRootLR(LRScheduler):
@@ -65,8 +89,15 @@ _LR_SCHEDULES = {
 
 
 def validation_step(
-    model, dataloader, criterion, device, tokenizer, step_no, max_length, validation_minibatches
-):
+    model: Transformer,
+    dataloader: DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+    tokenizer: PreTrainedTokenizerFast,
+    step_no: int,
+    max_length: int,
+    validation_minibatches: int,
+) -> dict[str, Any]:
 
     model.eval()
     start_time = time.time()
@@ -108,7 +139,14 @@ def validation_step(
     }
 
 
-def train_loop(stage, model, dataloaders, tokenizer, run, config):
+def train_loop(
+    stage: str,
+    model: Transformer,
+    dataloaders: dict[str, DataLoader],
+    tokenizer: PreTrainedTokenizerFast,
+    run: Run,
+    config: utils.Config,
+) -> None:
 
     train_config = config["train"][stage]
     device = torch.device(train_config["device"])
@@ -183,7 +221,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         step_no += 1
 
         elapsed_time = time.time() - start_time
-        result = {}
+        result: dict[str, Any] = {}
         result["type"] = "train"
         result["step_no"] = step_no
         result["num_tokens"] = batch_tokens
@@ -242,7 +280,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     return None
 
 
-def checkpoint_steps_on_disk(checkpoints_path):
+def checkpoint_steps_on_disk(checkpoints_path: str) -> list[int]:
     """Step numbers of the checkpoints in a run, ascending. Filenames are "<step>.pt"."""
     if not os.path.isdir(checkpoints_path):
         return []
@@ -254,7 +292,7 @@ def checkpoint_steps_on_disk(checkpoints_path):
     return sorted(steps)
 
 
-def _prune_checkpoints(checkpoints_path, keep):
+def _prune_checkpoints(checkpoints_path: str, keep: int | None) -> None:
     """Delete all but the `keep` most recent checkpoints, ordered by step number.
 
     Called after the new checkpoint is written, so an interrupted prune leaves too many.
@@ -274,8 +312,15 @@ def _prune_checkpoints(checkpoints_path, keep):
 
 
 def save_checkpoint(
-    model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints=None
-):
+    model: Transformer,
+    optimiser: Optimizer,
+    lr_scheduler: LRScheduler,
+    scaler: amp.GradScaler,
+    run_path: str,
+    step_no: int,
+    results: list[dict[str, Any]],
+    keep_checkpoints: int | None = None,
+) -> None:
     checkpoints_path = f"{run_path}/checkpoints"
     os.makedirs(checkpoints_path, exist_ok=True)
 
@@ -296,7 +341,9 @@ def save_checkpoint(
     return None
 
 
-def load_checkpoint(run_path, step_no, device=None):
+def load_checkpoint(
+    run_path: str, step_no: int, device: torch.device | None = None
+) -> dict[str, Any]:
     checkpoints_path = f"{run_path}/checkpoints"
     if device is not None:
         checkpoint = torch.load(f"{checkpoints_path}/{step_no}.pt", map_location=device)
@@ -307,7 +354,9 @@ def load_checkpoint(run_path, step_no, device=None):
     return checkpoint
 
 
-def create_training_objects(model, train_config, tokenizer):
+def create_training_objects(
+    model: Transformer, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
+) -> tuple[nn.CrossEntropyLoss, Optimizer, LRScheduler, amp.GradScaler]:
 
     device = torch.device(train_config["device"])
     # label_smoothing is defaulted because RL builds these objects and never uses the criterion
@@ -334,8 +383,10 @@ def create_training_objects(model, train_config, tokenizer):
     return criterion, optimiser, lr_scheduler, scaler
 
 
-def create_run(model, train_config, tokenizer):
-    results = []
+def create_run(
+    model: Transformer, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
+) -> Run:
+    results: list[dict[str, Any]] = []
 
     device = torch.device(train_config["device"])
     model.to(device)
@@ -355,7 +406,12 @@ def create_run(model, train_config, tokenizer):
     }
 
 
-def load_run(run_path, model, train_config, tokenizer):
+def load_run(
+    run_path: str,
+    model: Transformer,
+    train_config: dict[str, Any],
+    tokenizer: PreTrainedTokenizerFast,
+) -> Run:
     steps = checkpoint_steps_on_disk(f"{run_path}/checkpoints")
     if not steps:
         raise FileNotFoundError(f"No checkpoints found in {run_path}")
@@ -390,7 +446,9 @@ def load_run(run_path, model, train_config, tokenizer):
     }
 
 
-def load_model_weights(model, from_path, device, step=None):
+def load_model_weights(
+    model: Transformer, from_path: str, device: torch.device, step: int | None = None
+) -> int:
     """Start a stage from another stage's weights: parameters only.
 
     Not a resume: optimiser, scheduler and step counter are built fresh. `step` pins which
@@ -419,7 +477,13 @@ def load_model_weights(model, from_path, device, step=None):
     return step
 
 
-def get_run(run_path, model, train_config, tokenizer, init_from=None):
+def get_run(
+    run_path: str,
+    model: Transformer,
+    train_config: dict[str, Any],
+    tokenizer: PreTrainedTokenizerFast,
+    init_from: str | None = None,
+) -> Run:
     if checkpoint_steps_on_disk(f"{run_path}/checkpoints"):
         # A stage with its own history resumes from it and ignores init_from
         run = load_run(run_path, model, train_config, tokenizer)
@@ -437,7 +501,15 @@ def get_run(run_path, model, train_config, tokenizer, init_from=None):
     return run
 
 
-def train(stage, model, dataloaders, tokenizer, config, init_from=None, loop=None):
+def train(
+    stage: str,
+    model: Transformer,
+    dataloaders: dict[str, DataLoader],
+    tokenizer: PreTrainedTokenizerFast,
+    config: utils.Config,
+    init_from: str | None = None,
+    loop: TrainLoop | None = None,
+) -> None:
     """Run a stage. `init_from` is another stage's directory, whose weights seed the first run.
 
     `loop` is the per-stage training loop, defaulting to this module's, so stages share the

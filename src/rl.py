@@ -3,9 +3,20 @@ import torch.nn.functional as F
 from torch import amp
 import logging
 import time
+from typing import Any
+
+from torch import Tensor, nn
+from torch.utils.data import DataLoader
+from transformers import PreTrainedTokenizerFast
 
 from src import train, generation, synth
+from src.model import Transformer
 from src.dataloader import resume_at_minibatch
+from src.utils import Config
+
+# One generation minibatch's rollouts:
+# (token_ids, completion_mask, old_logprobs, seq_starts, advantages)
+Rollouts = tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
 
 # Which checker scores a rollout, keyed by the row's task (mirrors data._TASK_FORMATTERS).
 _TASK_CHECKERS = {
@@ -26,12 +37,14 @@ _TASK_STATS = {
 }
 
 
-def score(rows, completions):
+def score(rows: list[dict[str, Any]], completions: list[str]) -> list[float]:
     """Reward each rollout 1.0 if its checker accepts the answer, else 0.0."""
     return [float(_TASK_CHECKERS[row["task"]](row, c)) for row, c in zip(rows, completions)]
 
 
-def reward(rows, completions, options=None):
+def reward(
+    rows: list[dict[str, Any]], completions: list[str], options: dict[str, Any] | None = None
+) -> list[float]:
     """The reward each rollout is trained on: its task's graded reward, else its score.
 
     `options` are keyword arguments for the graded rewards, from train.rl.reward_options.
@@ -47,17 +60,17 @@ def reward(rows, completions, options=None):
 
 
 def validation_step(
-    model,
-    dataloader,
-    tokenizer,
-    device,
-    step_no,
-    max_new_tokens,
-    max_batches,
-    samples_per_prompt,
-    temperature,
-    seed,
-):
+    model: Transformer,
+    dataloader: DataLoader,
+    tokenizer: PreTrainedTokenizerFast,
+    device: torch.device,
+    step_no: int,
+    max_new_tokens: int,
+    max_batches: int,
+    samples_per_prompt: int,
+    temperature: float,
+    seed: int,
+) -> dict[str, Any]:
     """Score the test prompts two ways: sampled reward and greedy pass@1.
 
     `sampled_reward` is what the policy gradient raises directly, so it moves first.
@@ -67,7 +80,7 @@ def validation_step(
     and training's own draws are left alone.
     """
     sampled, passed, finished_count, total = 0.0, 0.0, 0, 0
-    stats = {}
+    stats: dict[str, list[float]] = {}
     with torch.random.fork_rng(devices=[device] if device.type == "cuda" else []):
         torch.manual_seed(seed)
         for batch_idx, batch in enumerate(dataloader):
@@ -109,7 +122,9 @@ def validation_step(
     }
 
 
-def token_budget_chunks(starts, ends, budget):
+def token_budget_chunks(
+    starts: list[int], ends: list[int], budget: int | None
+) -> list[list[int]]:
     """Split rows into chunks whose padded size, rows x width, fits `budget` tokens.
 
     `starts` and `ends` are each row's first real column and one past its last. Rollout
@@ -123,7 +138,8 @@ def token_budget_chunks(starts, ends, budget):
     if budget is None:
         return [order]
 
-    chunks, current = [], []
+    chunks: list[list[int]] = []
+    current: list[int] = []
     for row in order:
         candidate = current + [row]
         width = max(ends[i] for i in candidate) - min(starts[i] for i in candidate)
@@ -136,7 +152,7 @@ def token_budget_chunks(starts, ends, budget):
     return chunks
 
 
-def pool_rollouts(minibatches, pad_token_id):
+def pool_rollouts(minibatches: list[Rollouts], pad_token_id: int) -> Rollouts:
     """Join the rollouts of several generation minibatches into one set of tensors.
 
     Each minibatch is (token_ids, completion_mask, old_logprobs, seq_starts, advantages).
@@ -156,20 +172,20 @@ def pool_rollouts(minibatches, pad_token_id):
 
 
 def policy_gradient_backward(
-    model,
-    tokenizer,
-    scaler,
-    token_ids,
-    completion_mask,
-    old_logprobs,
-    seq_starts,
-    advantages,
-    blocked,
-    temperature,
-    router_aux_loss_coef,
-    loss_scale,
-    minibatch_token_size=None,
-):
+    model: Transformer,
+    tokenizer: PreTrainedTokenizerFast,
+    scaler: amp.GradScaler,
+    token_ids: Tensor,
+    completion_mask: Tensor,
+    old_logprobs: Tensor,
+    seq_starts: Tensor,
+    advantages: Tensor,
+    blocked: Tensor,
+    temperature: float,
+    router_aux_loss_coef: float,
+    loss_scale: float,
+    minibatch_token_size: int | None = None,
+) -> tuple[float, float, float, int]:
     """Rescore rollouts with gradients on and backpropagate the policy-gradient loss.
 
     Per rollout the loss is -(advantage x mean logprob of its own tokens), plus the router's
@@ -235,7 +251,14 @@ def policy_gradient_backward(
     return loss_pg_total, loss_aux_total, gap_total, tokens_total
 
 
-def train_loop(stage, model, dataloaders, tokenizer, run, config):
+def train_loop(
+    stage: str,
+    model: Transformer,
+    dataloaders: dict[str, DataLoader],
+    tokenizer: PreTrainedTokenizerFast,
+    run: train.Run,
+    config: Config,
+) -> None:
 
     train_config = config["train"][stage]
     device = torch.device(train_config["device"])
@@ -271,7 +294,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
 
     blocked = generation.blocked_token_ids(tokenizer, device)
 
-    def validate():
+    def validate() -> None:
         # Validation generates in its own shapes, so release what the last step left cached
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -312,7 +335,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     total_rescored_tokens = 0
     trained_groups = 0
     # Rollouts from mixed groups, held until the whole step is generated
-    pending = []
+    pending: list[Rollouts] = []
     resume_at_minibatch(dataloaders["train"], step_no * minibatches_per_step)
     optimiser.zero_grad(set_to_none=True)
 
@@ -401,7 +424,7 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
         step_no += 1
 
         elapsed_time = time.time() - start_time
-        result = {}
+        result: dict[str, Any] = {}
         result["type"] = "train"
         result["step_no"] = step_no
         result["num_completion_tokens"] = total_completion_tokens
@@ -467,6 +490,13 @@ def train_loop(stage, model, dataloaders, tokenizer, run, config):
     return None
 
 
-def train_rl(stage, model, dataloaders, tokenizer, config, init_from=None):
+def train_rl(
+    stage: str,
+    model: Transformer,
+    dataloaders: dict[str, DataLoader],
+    tokenizer: PreTrainedTokenizerFast,
+    config: Config,
+    init_from: str | None = None,
+) -> None:
     """Run the RL stage: train.train's bookkeeping, this module's loop."""
     return train.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)

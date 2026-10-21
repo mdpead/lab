@@ -2,10 +2,19 @@ import warnings
 
 import torch
 import torch.nn.functional as F
-from torch import amp
+from torch import Tensor, amp
+from transformers import PreTrainedTokenizerFast
+
+from src.model import Transformer
 
 
-def make_kv_cache(model, batches, seq_length, device, dtype=None):
+def make_kv_cache(
+    model: Transformer,
+    batches: int,
+    seq_length: int,
+    device: torch.device | str,
+    dtype: torch.dtype | None = None,
+) -> Tensor:
 
     d_h = model.d_h
     num_layers = model.num_layers
@@ -20,7 +29,7 @@ def make_kv_cache(model, batches, seq_length, device, dtype=None):
     return kv_cache
 
 
-def blocked_token_ids(tokenizer, device):
+def blocked_token_ids(tokenizer: PreTrainedTokenizerFast, device: torch.device | str) -> Tensor:
     """Ids sampling never draws: <bos>, <pad> and <unk>. <eos> is allowed, so the model can stop.
 
     Shared with the policy gradient, which must rescore under the same distribution.
@@ -29,7 +38,14 @@ def blocked_token_ids(tokenizer, device):
     return torch.tensor([i for i in blocked if i is not None], device=device)
 
 
-def generate(model, tokenizer, input_texts, device, max_new_tokens=None, temperature=0):
+def generate(
+    model: Transformer,
+    tokenizer: PreTrainedTokenizerFast,
+    input_texts: list[str],
+    device: torch.device | str,
+    max_new_tokens: int | None = None,
+    temperature: float = 0,
+) -> tuple[Tensor, Tensor, Tensor | None, Tensor, Tensor]:
     """Continue each prompt, returning (token_ids, completion_mask, logprobs, seq_starts,
     finished).
 
@@ -153,7 +169,7 @@ def generate(model, tokenizer, input_texts, device, max_new_tokens=None, tempera
     )
 
 
-def decode_rollouts(tokenizer, token_ids):
+def decode_rollouts(tokenizer: PreTrainedTokenizerFast, token_ids: Tensor) -> list[str]:
     """Decode rows of token ids to text, dropping only <bos>, <pad> and <eos>.
 
     Filtered by hand rather than with skip_special_tokens, which would also strip the
@@ -166,7 +182,13 @@ def decode_rollouts(tokenizer, token_ids):
     ]
 
 
-def generate_texts(model, tokenizer, input_texts, device, max_new_tokens=None):
+def generate_texts(
+    model: Transformer,
+    tokenizer: PreTrainedTokenizerFast,
+    input_texts: list[str],
+    device: torch.device | str,
+    max_new_tokens: int | None = None,
+) -> tuple[list[str], list[bool]]:
     """Greedy-decode each prompt, returning (texts, finished).
 
     Each text is the prompt plus its continuation. `finished[i]` is True when row i
