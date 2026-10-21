@@ -3,7 +3,8 @@ torch==2.12.1
 triton==3.7.1
 transformers==5.12.1
 tokenizers==0.22.2
+numpy==2.4.6
+PyYAML==6.0.3
 datasets==5.0.0
-sacrebleu==2.6.0
 pytest==9.1.1
 ipykernel==7.3.0
