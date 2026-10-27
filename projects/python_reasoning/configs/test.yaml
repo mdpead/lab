@@ -1,0 +1,111 @@
+name: test
+seed: 0
+
+model:
+  d_model: 256
+  num_heads: 4
+  num_kv_heads: 2    # GQA: groups of 2 query heads share a K/V head
+  d_h: 64
+  max_length: 256    # a traced easy-tier synth task runs 93-177 tokens
+  d_ff: 1024
+  num_experts: 4     # total experts per MoE layer
+  top_k: 2           # experts active per token (Mixtral-style)
+  capacity_factor: 1.25  # rows each expert reserves, as a multiple of its balanced share
+  num_layers: 2
+  dropout: 0.0
+
+train:
+  pretrain:
+    effective_batch_token_size: 16384
+    minibatch_token_size: 8192     # -> 2 accumulation steps
+    learning_rate: 1.0e-4
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 200
+    label_smoothing: 0.0
+    router_aux_loss_coef: 0.01     # weight on the MoE load-balancing loss
+    device: cuda
+    checkpoint_steps: 100
+    keep_checkpoints: 2
+    warm_up_steps: 5
+    validation_steps: 20
+    validation_batches: 1
+    compile_model: true
+    num_workers: 4
+    prefetch_factor: 2
+    cache_clear_steps: 50
+
+  sft:
+    effective_batch_token_size: 16384
+    minibatch_token_size: 8192
+    learning_rate: 2.0e-5           # an order under pretrain
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 100
+    label_smoothing: 0.0
+    router_aux_loss_coef: 0.01
+    device: cuda
+    checkpoint_steps: 50
+    keep_checkpoints: 2
+    warm_up_steps: 5
+    validation_steps: 20
+    validation_batches: 1
+    compile_model: true
+    num_workers: 4
+    prefetch_factor: 2
+    init_from_step: 100             # which pretrain checkpoint seeds this stage. Pinned so
+                                    # the saved config records the weights' ancestry.
+
+  rl:
+    generation_prompts_size: 4
+    effective_prompts_size: 8
+    completions_per_prompt: 8
+    minibatch_token_size: 2048      # padded tokens per backward pass; small enough here
+                                    # to exercise the split
+    learning_rate: 1.0e-6           # an order under sft
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 10
+    max_new_tokens: 160             # what the longest prompt leaves of the 256 context
+    temperature: 1.0                # the model's own distribution
+    router_aux_loss_coef: 0.01      # RL trains the same experts, so the term still applies
+    device: cuda
+    checkpoint_steps: 50
+    keep_checkpoints: 2
+    warm_up_steps: 2                # not 0: both schedules divide by it
+    lr_schedule: constant           # no decay: the policy keeps making new data
+    validation_steps: 20
+    validation_prompts_size: 8      # prompts per validation batch
+    validation_batches: 1           # in batches of validation_prompts_size
+    validation_samples: 8           # sampled rollouts per test prompt. Defaults to
+                                    # completions_per_prompt.
+    compile_model: false            # generation changes sequence length every step
+    init_from_step: 100
+
+data:
+  pretrain:
+    num_shards: 1           # 380MB
+    sample_size: 2500       # enough that 200 steps x 16384 tokens stays inside one epoch
+    test_split_ratio: 0.1
+  sft:
+    num_records: 200        # records, before the fan-out over `tasks`
+    tier: easy              # max_depth 0: straight-line code, the tier a small model can do
+    tasks: [output]         # synth task formatters to emit: output and/or input prediction
+    inputs_per_fn: 4        # sampled inputs per generated function
+    with_trace: true        # executed-line trace in the completion, as chain of thought
+    test_split_ratio: 0.1
+  rl:
+    num_records: 200
+    tier: easy
+    tasks: [output]
+    inputs_per_fn: 4
+    test_split_ratio: 0.1
+
+tokenizer:
+  vocab_size: 16000
+  training_size: 1000
+  digit_split: true      # every digit its own token, so arithmetic is compositional
+
+locations:
+  data_dir: ./data
+  models_dir: ./models

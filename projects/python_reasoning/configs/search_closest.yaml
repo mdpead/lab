@@ -1,0 +1,79 @@
+name: search_closest
+seed: 0
+
+# `search` with the `closest` partial credit: a wrong answer is graded by how near the
+# rollout's best guess came to the target, not by returned values it got exactly. RL only:
+# it starts from `search`'s sft model, so seed the run directory by hand before the first
+# run:
+#
+#   mkdir -p models/search_closest/sft/checkpoints
+#   ln -s "$(realpath models/search/sft/checkpoints/1000.pt)" models/search_closest/sft/checkpoints/1000.pt
+#   cp -r models/search/tokenizer models/search_closest/tokenizer
+#
+# The model, tokenizer and data.rl sections must stay identical to `search`'s, and
+# everything under train.rl except reward_options.
+model:
+  d_model: 1024
+  num_heads: 16
+  num_kv_heads: 4
+  d_h: 64
+  max_length: 1024
+  d_ff: 1408
+  num_experts: 4
+  top_k: 2
+  capacity_factor: 1.25
+  num_layers: 16
+  dropout: 0.0
+
+train:
+  rl:
+    generation_prompts_size: 32    # x completions_per_prompt = 512 rows, the whole step in
+                                   # one batch. A decode pass costs about the same at any
+                                   # row count, so time goes with the number of batches:
+                                   # 26s and 9.1GB here, against 84s at 8.
+    effective_prompts_size: 32     # prompts per update: 512 rollouts, as in `input`
+    completions_per_prompt: 16     # twice `input`'s: a search that lands is rare at first
+    minibatch_token_size: 4096     # padded tokens per backward pass: 21s and 10.2GB for a
+                                   # step, against 33s at 2048. 8192 overflows the card.
+    advantage_sd_floor: 0.1        # groups can differ by one attempt's cost of 0.02; below
+                                   # this spread the advantage scales down
+    reward_options:
+      partial_credit: closest
+    learning_rate: 1.0e-5
+    lr_schedule: constant
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 300                 # 9,600 prompts, about 2.7 passes over the train split
+    max_new_tokens: 512            # an attempt is ~80 tokens, 136 at most
+    temperature: 1.0
+    router_aux_loss_coef: 0.01
+    device: cuda
+    checkpoint_steps: 20           # 4.2GB each
+    keep_checkpoints: 1
+    warm_up_steps: 5
+    validation_steps: 60           # each validation takes several minutes
+    validation_prompts_size: 256   # x validation_samples = 512 rows, as in training
+    validation_batches: 8          # the whole 2,024-prompt test split
+    validation_samples: 2
+    compile_model: false
+    cache_clear_steps: 1
+    init_from_step: 1000           # sft's final step
+
+data:
+  rl:
+    num_records: 5600       # 3,576 train / 2,024 test prompts over 527 functions, from
+                            # their own seed. A test split this size puts the pass
+                            # rate's standard error near 1 point.
+    tier: easy
+    tasks: [search]
+    inputs_per_fn: 4
+    test_split_ratio: 0.36
+
+tokenizer:
+  vocab_size: 32000
+  training_size: 50000
+  digit_split: true
+
+locations:
+  data_dir: ./data
+  models_dir: ./models

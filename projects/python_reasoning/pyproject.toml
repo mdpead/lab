@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["models"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# Triton launches use `grid = lambda meta: ...`; kernels keep the paper's names (l, O)
+ignore = ["E731", "E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "scripts"]
+
+[tool.pytest.ini_options]
+# Lets a bare `pytest` import src, as `python -m pytest` already could
+pythonpath = ["."]
