@@ -1,0 +1,135 @@
+name: base_lr3
+seed: 0
+
+# base with sft at sft_only's learning rate, so the two differ only in whether sft starts
+# from pretrained weights. Starts from base's pretrain. Seed the run directory by hand
+# before the first run:
+#
+#   mkdir -p models/base_lr3/pretrain/checkpoints
+#   ln -s "$(realpath models/base/pretrain/checkpoints/10000.pt)" models/base_lr3/pretrain/checkpoints/10000.pt
+#   cp -r models/base/tokenizer models/base_lr3/tokenizer
+#
+# Sized for a 16GB card (RTX 5070 Ti). 352M total params is 5.6GB of persistent state under
+# AMP before any activation. Check the peak over a few hundred steps before a full run.
+model:
+  d_model: 1024
+  num_heads: 16
+  num_kv_heads: 4    # GQA: groups of 4 query heads share a K/V head
+  d_h: 64            # num_heads * d_h == d_model, so attention doesn't bottleneck
+  max_length: 1024   # at 512, 19% of medium-tier and 65% of hard-tier traces overflow
+  d_ff: 1408         # 11 * 128; with top_k 2 the effective FFN width is 2.75x d_model
+  num_experts: 4     # 8 would be 628M total params, 10GB of optimiser state
+  top_k: 2           # experts active per token (Mixtral-style)
+  capacity_factor: 1.25  # rows each expert reserves, as a multiple of its balanced share.
+                         # ~25% padded FFN compute against router imbalance.
+  num_layers: 16
+  dropout: 0.0       # single pass over a large corpus
+
+train:
+  pretrain:
+    effective_batch_token_size: 131072
+    minibatch_token_size: 4096     # -> batch of 4 at max_length 1024; 32 accumulation steps
+    learning_rate: 7.0e-4          # 1 / sqrt(d_model * warm_up_steps)
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 10000               # ~1.3B tokens, ~6 per active param, ~12h. A first stage:
+                                   # raise to 35000 (~4.6B tokens) to resume if sft shows
+                                   # pretraining helps.
+    label_smoothing: 0.0
+    router_aux_loss_coef: 0.01     # weight on the MoE load-balancing loss
+    device: cuda
+    checkpoint_steps: 2000         # 4.2GB per checkpoint; ~2.4h apart
+    keep_checkpoints: 3            # omit to keep every checkpoint
+    warm_up_steps: 2000
+    validation_steps: 500
+    validation_batches: 3          # multiplied by grad_accum_steps (32), so 96 minibatches
+    compile_model: true            # cuts peak memory ~10% as well as adding throughput
+    num_workers: 8
+    prefetch_factor: 4
+
+  sft:
+    effective_batch_token_size: 32768
+    # The data, steps and batch are sft_only's, so the two runs differ only in the
+    # weights sft starts from and the learning rate that suits them.
+    minibatch_token_size: 2048     # as sft_only: ragged batches fragmented the allocator at 4096
+    learning_rate: 3.0e-4          # as sft_only
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 10000               # ~328M tokens, ~3 epochs; ~5h at sft_only's 17.9k tok/s
+    label_smoothing: 0.0
+    router_aux_loss_coef: 0.01
+    device: cuda
+    checkpoint_steps: 2000         # 4.2GB each; the final step saves regardless
+    keep_checkpoints: 2
+    warm_up_steps: 200
+    validation_steps: 200
+    validation_batches: 1          # multiplied by grad_accum_steps (16) -> 16 minibatches
+    compile_model: false           # ragged batch widths, over torch's recompile limit
+    num_workers: 8
+    prefetch_factor: 4
+    init_from_step: 10000          # the pretrain checkpoint to start from. The schedule does
+                                   # not depend on pretrain's num_steps, so any saved step is
+                                   # a usable model; raise this to rerun from a later one.
+
+  rl:
+    # Untuned starting points from short trials. The loop learns only when a prompt's
+    # rollouts disagree, so watch mixed_group_rate before reading into a flat curve.
+    generation_prompts_size: 64    # x completions_per_prompt = 512 rows, the whole step in
+                                   # one batch (untested here; measured on `search`)
+    effective_prompts_size: 64     # prompts per update: 512 rollouts, of which only groups
+                                   # whose rollouts disagree are trained on (about a fifth)
+    completions_per_prompt: 8
+    minibatch_token_size: 2048     # padded tokens per backward pass, as sft_only
+    learning_rate: 1.0e-5
+    lr_schedule: constant          # no decay: the policy keeps making new data
+    adam_betas: [0.9, 0.95]
+    adam_eps: 1.0e-8
+    num_steps: 100                 # as sft_only, so the two results tables line up
+    max_new_tokens: 256            # an easy-tier traced completion runs well under this
+    temperature: 1.0               # raise it first if mixed_group_rate is low
+    router_aux_loss_coef: 0.01
+    device: cuda
+    checkpoint_steps: 20           # 4.2GB each; the final step saves regardless
+    keep_checkpoints: 1
+    warm_up_steps: 5
+    validation_steps: 25
+    validation_prompts_size: 32    # prompts per validation batch
+    validation_batches: 13         # the whole ~400-prompt test split
+    validation_samples: 2          # sampled rollouts per test prompt: the noise that
+                                   # matters is across functions, not draws
+    compile_model: false           # generation changes sequence length every step
+    cache_clear_steps: 1           # generation and the rescore allocate very different shapes
+    init_from_step: 10000          # sft's final step
+
+data:
+  pretrain:
+    test_split_ratio: 0.001
+    num_shards: 21         # 18 cover the 4.59B-token budget; 21 leaves margin. ~22GB of 62GB.
+                           # Hardcoded, not derived from num_steps: data.pretrain is in the
+                           # stage fingerprint, so a derived value would wipe the run.
+                           # Omit to load all 59 shards.
+
+  sft:
+    num_records: 2500000    # as sft_only: ~2.25M train rows at ~129 tokens
+    tier: easy              # straight-line code; medium is viable at max_length 1024
+    tasks: [output]
+    inputs_per_fn: 4
+    with_trace: true
+    test_split_ratio: 0.02
+
+  rl:
+    num_records: 8000       # ~7,600 train / ~400 test prompts, from their own seed. 400
+                            # prompts is ~100 independent functions.
+    tier: easy
+    tasks: [output]
+    inputs_per_fn: 4
+    test_split_ratio: 0.05
+
+tokenizer:
+  vocab_size: 32000
+  training_size: 50000   # source files used to train BPE, not the training corpus size
+  digit_split: true      # every digit its own token, so arithmetic is compositional
+
+locations:
+  data_dir: ./data
+  models_dir: ./models

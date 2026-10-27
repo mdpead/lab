@@ -1,0 +1,277 @@
+"""Kernel correctness against a PyTorch reference.
+
+Rather than a hand-picked atol, each comparison asserts the kernel is no less accurate
+than the same reference maths in the same precision.
+"""
+
+import pytest
+import torch
+
+from src.kernels.flash_attention import flash_attention
+
+pytestmark = pytest.mark.cuda
+
+DEV = "cuda"
+DTYPE = torch.float16
+
+# (num_q_heads, num_kv_heads) -> ratio 1 (MHA), 4, 2, and 4 with a single KV head (MQA)
+HEAD_CONFIGS = [(4, 4), (8, 2), (8, 4), (4, 1)]
+PAD_CONFIGS = [[0, 0], [0, 17], [5, 40]]
+
+
+def _attention(q, k, v, seq_starts, causal, compute_dtype):
+    """Reference attention, with GQA via repeat_interleave. Handles q_len < k_len with
+    queries as the last q_len positions of the keys, the kernel's kv-cache convention."""
+    q_len = q.shape[2]
+    k_len = k.shape[2]
+    head_dim = q.shape[3]
+    ratio = q.shape[1] // k.shape[1]
+
+    qq = q.to(compute_dtype)
+    kk = k.repeat_interleave(ratio, dim=1).to(compute_dtype)
+    vv = v.repeat_interleave(ratio, dim=1).to(compute_dtype)
+
+    scores = (qq @ kk.transpose(-1, -2)) / (head_dim**0.5)
+
+    q_pos = torch.arange(q_len, device=q.device)
+    kv_pos = torch.arange(k_len, device=q.device)
+    mask = (kv_pos[None, :] >= seq_starts[:, None].to(kv_pos.dtype))[:, None, None, :]
+    if causal:
+        # Query i sits at absolute key position i + (k_len - q_len)
+        mask = mask & (kv_pos[None, :] <= q_pos[:, None] + (k_len - q_len))[None, None]
+    scores = scores.masked_fill(~mask, float("-inf"))
+
+    probs = torch.softmax(scores, dim=-1)
+    # A fully-masked row softmaxes to NaN; the kernel yields zeros for those rows.
+    probs = torch.nan_to_num(probs, nan=0.0)
+    return probs @ vv
+
+
+def _max_err(a, b):
+    return (a.float() - b.float()).abs().max().item()
+
+
+def assert_no_worse_than_reference(actual, exact, same_precision, label, slack=2.0, rel_floor=2e-2):
+    """Pass if the kernel is no further from `exact` than the same maths in the same
+    precision (within slack), or within rel_floor of the tensor's scale.
+
+    The second clause covers a near-zero denominator when the fp16 reference lands close
+    to fp32. A genuine bug produces order-1 relative error and is still caught.
+    """
+    err = _max_err(actual, exact)
+    baseline = _max_err(same_precision, exact)
+    scale = max(exact.float().abs().max().item(), 1e-9)
+    limit = max(slack * baseline, rel_floor * scale)
+    assert err <= limit, (
+        f"{label}: error {err:.4g} exceeds limit {limit:.4g} "
+        f"(fp16 baseline {baseline:.4g}, scale {scale:.4g}, rel {err / scale:.2e})"
+    )
+
+
+def _inputs(batch, q_heads, kv_heads, seq, head_dim, pads, requires_grad=False, k_seq=None):
+    k_seq = seq if k_seq is None else k_seq
+    q = torch.randn(
+        batch, q_heads, seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
+    k = torch.randn(
+        batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
+    v = torch.randn(
+        batch, kv_heads, k_seq, head_dim, device=DEV, dtype=DTYPE, requires_grad=requires_grad
+    )
+    seq_starts = torch.tensor(pads, device=DEV, dtype=torch.int32)
+    return q, k, v, seq_starts
+
+
+@pytest.mark.parametrize("q_heads,kv_heads", HEAD_CONFIGS)
+@pytest.mark.parametrize("causal", [True, False])
+@pytest.mark.parametrize("pads", PAD_CONFIGS)
+def test_forward_matches_reference(q_heads, kv_heads, causal, pads):
+    seq, head_dim = 64, 32
+    q, k, v, seq_starts = _inputs(len(pads), q_heads, kv_heads, seq, head_dim, pads)
+
+    out = flash_attention(q, k, v, seq_starts, causal=causal)
+    exact = _attention(q, k, v, seq_starts, causal, torch.float32)
+    same_precision = _attention(q, k, v, seq_starts, causal, DTYPE)
+
+    assert not out.isnan().any(), "kernel produced NaN"
+    assert not out.isinf().any(), "kernel produced inf"
+
+    # Only rows the caller cares about: pad-position queries are discarded downstream.
+    for b, start in enumerate(pads):
+        assert_no_worse_than_reference(
+            out[b, :, start:], exact[b, :, start:], same_precision[b, :, start:], f"out row {b}"
+        )
+
+
+@pytest.mark.parametrize("q_heads,kv_heads", HEAD_CONFIGS)
+@pytest.mark.parametrize("pads", [[0, 0], [5, 40]])
+def test_backward_matches_reference(q_heads, kv_heads, pads):
+    seq, head_dim, causal = 64, 32, True
+    q, k, v, seq_starts = _inputs(
+        len(pads), q_heads, kv_heads, seq, head_dim, pads, requires_grad=True
+    )
+
+    # Weight the loss so pad-position queries contribute nothing
+    weights = torch.zeros(len(pads), 1, seq, 1, device=DEV)
+    for b, start in enumerate(pads):
+        weights[b, :, start:] = 1.0
+
+    def grads_of(fn):
+        qq, kk, vv = (x.detach().clone().requires_grad_(True) for x in (q, k, v))
+        (fn(qq, kk, vv).float() * weights).pow(2).sum().backward()
+        return qq.grad, kk.grad, vv.grad
+
+    got = grads_of(lambda a, b, c: flash_attention(a, b, c, seq_starts, causal=causal))
+    exact = grads_of(lambda a, b, c: _attention(a, b, c, seq_starts, causal, torch.float32))
+    same_precision = grads_of(lambda a, b, c: _attention(a, b, c, seq_starts, causal, DTYPE))
+
+    for name, g, e, s in zip(("dq", "dk", "dv"), got, exact, same_precision):
+        assert not g.isnan().any(), f"{name} contains NaN"
+        assert not g.isinf().any(), f"{name} contains inf"
+        assert_no_worse_than_reference(g, e, s, name)
+
+
+@pytest.mark.parametrize("q_heads,kv_heads", [(4, 4), (8, 2)])
+def test_padding_is_invisible(q_heads, kv_heads):
+    """The same real tokens must give the same output with or without a leading pad block."""
+    seq, head_dim, pad = 48, 32, 12
+    real = seq - pad
+
+    q = torch.randn(1, q_heads, real, head_dim, device=DEV, dtype=DTYPE)
+    k = torch.randn(1, kv_heads, real, head_dim, device=DEV, dtype=DTYPE)
+    v = torch.randn(1, kv_heads, real, head_dim, device=DEV, dtype=DTYPE)
+
+    def pad_front(x):
+        filler = torch.randn(1, x.shape[1], pad, head_dim, device=DEV, dtype=DTYPE)
+        return torch.cat([filler, x], dim=2)
+
+    unpadded = flash_attention(q, k, v, torch.zeros(1, device=DEV, dtype=torch.int32), causal=True)
+    padded = flash_attention(
+        pad_front(q),
+        pad_front(k),
+        pad_front(v),
+        torch.full((1,), pad, device=DEV, dtype=torch.int32),
+        causal=True,
+    )
+
+    err = _max_err(padded[:, :, pad:], unpadded)
+    scale = unpadded.float().abs().max().item()
+    assert err / scale < 5e-3, f"padding changed the result: rel {err / scale:.4g}"
+
+
+def test_fully_masked_rows_are_zero_not_nan():
+    """Pad-position queries under causal masking see no valid keys at all."""
+    pads = [0, 20]
+    q, k, v, seq_starts = _inputs(2, 4, 2, 64, 32, pads)
+    out = flash_attention(q, k, v, seq_starts, causal=True)
+
+    masked_rows = out[1, :, : pads[1]]
+    assert not out.isnan().any()
+    assert masked_rows.abs().max().item() == 0.0, "fully-masked rows should be exactly zero"
+
+
+def test_rejects_mismatched_seq_starts_shape():
+    q, k, v, _ = _inputs(2, 4, 2, 32, 32, [0, 0])
+    bad = torch.zeros(3, device=DEV, dtype=torch.int32)  # batch is 2, not 3
+    with pytest.raises(AssertionError):
+        flash_attention(q, k, v, bad, causal=True)
+
+
+# --- KV cache: queries cover only the last q_len positions of the key sequence ---
+
+
+@pytest.mark.parametrize("q_heads,kv_heads", [(4, 4), (8, 2)])
+@pytest.mark.parametrize("q_len,k_len", [(1, 100), (7, 100), (1, 129)])
+@pytest.mark.parametrize("pads", [[0, 0], [0, 37]])
+def test_forward_kv_cache_matches_reference(q_heads, kv_heads, q_len, k_len, pads):
+    head_dim = 32
+    q, k, v, seq_starts = _inputs(len(pads), q_heads, kv_heads, q_len, head_dim, pads, k_seq=k_len)
+
+    out = flash_attention(q, k, v, seq_starts, causal=True)
+    exact = _attention(q, k, v, seq_starts, True, torch.float32)
+    same_precision = _attention(q, k, v, seq_starts, True, DTYPE)
+
+    assert not out.isnan().any(), "kernel produced NaN"
+    # Suffix queries all sit past the pad block, so every row is comparable.
+    assert_no_worse_than_reference(out, exact, same_precision, f"q_len={q_len} k_len={k_len}")
+
+
+@pytest.mark.parametrize("q_len", [1, 7])
+def test_suffix_queries_match_full_attention(q_len):
+    """A decode step reproduces what full attention computes for the same rows."""
+    seq, head_dim, pads = 100, 32, [0, 12]
+    q, k, v, seq_starts = _inputs(len(pads), 8, 2, seq, head_dim, pads)
+
+    full = flash_attention(q, k, v, seq_starts, causal=True)
+    suffix = flash_attention(q[:, :, -q_len:], k, v, seq_starts, causal=True)
+
+    err = _max_err(suffix, full[:, :, -q_len:])
+    scale = full[:, :, -q_len:].float().abs().max().item()
+    assert err / scale < 5e-3, f"suffix rows diverge from full attention: rel {err / scale:.4g}"
+
+
+def test_rejects_more_queries_than_keys():
+    q, k, v, seq_starts = _inputs(2, 4, 2, 32, 32, [0, 0], k_seq=16)
+    with pytest.raises(AssertionError):
+        flash_attention(q, k, v, seq_starts, causal=True)
+
+
+def test_backward_rejects_kv_cache_shapes():
+    """Backward is training-only; unequal q/k lengths must fail loudly, not silently."""
+    q, k, v, seq_starts = _inputs(1, 4, 2, 8, 32, [0], requires_grad=True, k_seq=32)
+    out = flash_attention(q, k, v, seq_starts, causal=True)
+    with pytest.raises(AssertionError):
+        out.float().sum().backward()
+
+
+# --- Cross-check against torch's fused SDPA, an independent implementation ---
+
+SDPA_SEQS = [128, 256, 512, 1024]
+
+
+def _sdpa(q, k, v, causal, compute_dtype):
+    ratio = q.shape[1] // k.shape[1]
+    return torch.nn.functional.scaled_dot_product_attention(
+        q.to(compute_dtype),
+        k.repeat_interleave(ratio, dim=1).to(compute_dtype),
+        v.repeat_interleave(ratio, dim=1).to(compute_dtype),
+        is_causal=causal,
+    )
+
+
+@pytest.mark.parametrize("q_heads,kv_heads", [(4, 4), (8, 2)])
+@pytest.mark.parametrize("causal", [True, False])
+@pytest.mark.parametrize("seq", SDPA_SEQS)
+def test_forward_matches_sdpa(q_heads, kv_heads, causal, seq):
+    batch, head_dim = 2, 64
+    q, k, v, seq_starts = _inputs(batch, q_heads, kv_heads, seq, head_dim, [0] * batch)
+
+    out = flash_attention(q, k, v, seq_starts, causal=causal)
+    exact = _sdpa(q, k, v, causal, torch.float32)
+    same_precision = _sdpa(q, k, v, causal, DTYPE)
+
+    assert not out.isnan().any(), "kernel produced NaN"
+    assert_no_worse_than_reference(out, exact, same_precision, f"sdpa seq={seq}")
+
+
+@pytest.mark.parametrize("causal", [True, False])
+@pytest.mark.parametrize("seq", SDPA_SEQS)
+def test_backward_matches_sdpa(causal, seq):
+    batch, q_heads, kv_heads, head_dim = 2, 4, 4, 64
+    q, k, v, seq_starts = _inputs(
+        batch, q_heads, kv_heads, seq, head_dim, [0] * batch, requires_grad=True
+    )
+
+    def grads_of(fn):
+        qq, kk, vv = (x.detach().clone().requires_grad_(True) for x in (q, k, v))
+        fn(qq, kk, vv).float().pow(2).sum().backward()
+        return qq.grad, kk.grad, vv.grad
+
+    got = grads_of(lambda a, b, c: flash_attention(a, b, c, seq_starts, causal=causal))
+    exact = grads_of(lambda a, b, c: _sdpa(a, b, c, causal, torch.float32))
+    same_precision = grads_of(lambda a, b, c: _sdpa(a, b, c, causal, DTYPE))
+
+    for name, g, e, s in zip(("dq", "dk", "dv"), got, exact, same_precision):
+        assert not g.isnan().any(), f"{name} contains NaN"
+        assert_no_worse_than_reference(g, e, s, f"sdpa {name} seq={seq}")

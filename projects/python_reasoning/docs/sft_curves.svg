@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="720" height="420" role="img" aria-labelledby="title desc">
+<title id="title">SFT validation loss for three runs</title>
+<desc id="desc">Validation loss over 10,000 SFT steps on a log scale. The pretrained run at 3e-4 is lowest throughout and ends at 0.0068, the from-scratch run at 3e-4 ends at 0.0101, and the pretrained run at 1e-4 levels off and ends at 0.0138.</desc>
+<style>
+  .surface { fill: #fcfcfb; }
+  .title { fill: #0b0b0b; font: 600 16px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .panel-title { fill: #0b0b0b; font: 600 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .subtitle, .label { fill: #52514e; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .value { fill: #0b0b0b; font: 600 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .tick { fill: #898781; font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e1e0d9; stroke-width: 1; }
+  .axis { stroke: #c3c2b7; stroke-width: 1; }
+  .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  circle.ring { stroke: #fcfcfb; stroke-width: 2; }
+  .s1 { stroke: #2a78d6; } .s1.dot { fill: #2a78d6; }
+  .s2 { stroke: #eb6834; } .s2.dot { fill: #eb6834; }
+  .s3 { stroke: #1baf7a; } .s3.dot { fill: #1baf7a; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; }
+    .title, .panel-title, .value { fill: #ffffff; }
+    .subtitle, .label { fill: #c3c2b7; }
+    .grid { stroke: #2c2c2a; }
+    .axis { stroke: #383835; }
+    circle.ring { stroke: #1a1a19; }
+    .s1 { stroke: #3987e5; } .s1.dot { fill: #3987e5; }
+    .s2 { stroke: #d95926; } .s2.dot { fill: #d95926; }
+    .s3 { stroke: #199e70; } .s3.dot { fill: #199e70; }
+  }
+</style>
+<rect class="surface" width="720" height="420" rx="8"/>
+<text class="title" x="20" y="30">SFT validation loss</text>
+<text class="subtitle" x="20" y="50">Lower is better. Same data and schedule; the runs differ in starting weights and learning rate.</text>
+<line class="line s1" x1="64" y1="72" x2="82" y2="72"/>
+<text class="label" x="88" y="76">Pretrained, 3e-4</text>
+<line class="line s2" x1="224" y1="72" x2="242" y2="72"/>
+<text class="label" x="248" y="76">From scratch, 3e-4</text>
+<line class="line s3" x1="398" y1="72" x2="416" y2="72"/>
+<text class="label" x="422" y="76">Pretrained, 1e-4</text>
+<line class="grid" x1="64" y1="368.0" x2="520" y2="368.0"/>
+<text class="tick" x="56" y="372.0" text-anchor="end">0.005</text>
+<line class="grid" x1="64" y1="324.3" x2="520" y2="324.3"/>
+<text class="tick" x="56" y="328.3" text-anchor="end">0.01</text>
+<line class="grid" x1="64" y1="280.7" x2="520" y2="280.7"/>
+<text class="tick" x="56" y="284.7" text-anchor="end">0.02</text>
+<line class="grid" x1="64" y1="223.0" x2="520" y2="223.0"/>
+<text class="tick" x="56" y="227.0" text-anchor="end">0.05</text>
+<line class="grid" x1="64" y1="179.3" x2="520" y2="179.3"/>
+<text class="tick" x="56" y="183.3" text-anchor="end">0.1</text>
+<line class="grid" x1="64" y1="135.7" x2="520" y2="135.7"/>
+<text class="tick" x="56" y="139.7" text-anchor="end">0.2</text>
+<line class="grid" x1="64" y1="92.0" x2="520" y2="92.0"/>
+<text class="tick" x="56" y="96.0" text-anchor="end">0.4</text>
+<line class="axis" x1="64" y1="368" x2="520" y2="368"/>
+<text class="tick" x="64.0" y="386" text-anchor="middle">0</text>
+<text class="tick" x="155.2" y="386" text-anchor="middle">2,000</text>
+<text class="tick" x="246.4" y="386" text-anchor="middle">4,000</text>
+<text class="tick" x="337.6" y="386" text-anchor="middle">6,000</text>
+<text class="tick" x="428.8" y="386" text-anchor="middle">8,000</text>
+<text class="tick" x="520.0" y="386" text-anchor="middle">10,000</text>
+<text class="label" x="292.0" y="408" text-anchor="middle">SFT step</text>
+<text class="label" transform="translate(14 230.0) rotate(-90)" text-anchor="middle">Validation loss, log scale</text>
+<polyline class="line s1" points="73.1,177.1 82.2,201.2 91.4,217.9 100.5,230.6 109.6,236.6 118.7,247.2 127.8,256.1 137.0,258.7 146.1,263.3 155.2,267.7 164.3,273.5 173.4,276.6 182.6,277.1 191.7,282.3 200.8,276.4 209.9,282.8 219.0,288.9 228.2,290.0 237.3,286.8 246.4,290.0 255.5,290.6 264.6,305.1 273.8,303.8 282.9,305.9 292.0,309.7 301.1,303.9 310.2,305.2 319.4,308.0 328.5,303.8 337.6,308.4 346.7,311.5 355.8,316.1 365.0,322.2 374.1,326.0 383.2,319.8 392.3,329.9 401.4,325.3 410.6,328.9 419.7,323.8 428.8,336.0 437.9,337.2 447.0,326.2 456.2,325.5 465.3,327.2 474.4,331.1 483.5,330.4 492.6,339.2 501.8,344.3 510.9,335.7 520.0,348.3"/>
+<circle class="dot ring s1" cx="520.0" cy="348.3" r="4"><title>Pretrained, 3e-4: 0.0068 at step 10,000</title></circle>
+<text class="value" x="532.0" y="352.3">0.0068</text>
+<text class="label" x="584.0" y="352.3">Pretrained, 3e-4</text>
+<polyline class="line s2" points="73.1,108.2 82.2,155.2 91.4,175.8 100.5,189.9 109.6,200.6 118.7,210.7 127.8,222.8 137.0,235.3 146.1,237.5 155.2,245.2 164.3,249.8 173.4,258.3 182.6,261.1 191.7,265.2 200.8,267.7 209.9,271.0 219.0,274.9 228.2,279.9 237.3,281.7 246.4,287.5 255.5,280.3 264.6,285.4 273.8,283.0 282.9,293.6 292.0,294.2 301.1,296.3 310.2,301.7 319.4,291.6 328.5,301.5 337.6,300.3 346.7,305.5 355.8,306.5 365.0,306.0 374.1,309.4 383.2,313.1 392.3,308.9 401.4,315.6 410.6,316.9 419.7,320.6 428.8,319.2 437.9,305.2 447.0,323.5 456.2,316.4 465.3,316.9 474.4,323.3 483.5,325.3 492.6,324.1 501.8,332.5 510.9,323.7 520.0,323.5"/>
+<circle class="dot ring s2" cx="520.0" cy="323.5" r="4"><title>From scratch, 3e-4: 0.0101 at step 10,000</title></circle>
+<text class="value" x="532.0" y="327.5">0.0101</text>
+<text class="label" x="584.0" y="327.5">From scratch, 3e-4</text>
+<polyline class="line s3" points="73.1,167.0 82.2,190.4 91.4,204.9 100.5,214.8 109.6,221.4 118.7,227.4 127.8,234.7 137.0,237.3 146.1,244.0 155.2,245.8 164.3,249.6 173.4,248.4 182.6,253.5 191.7,255.9 200.8,259.7 209.9,259.1 219.0,262.8 228.2,266.4 237.3,269.2 246.4,271.9 255.5,271.5 264.6,274.3 273.8,273.4 282.9,275.7 292.0,275.5 301.1,277.9 310.2,280.4 319.4,279.2 328.5,283.2 337.6,284.3 346.7,280.7 355.8,286.2 365.0,287.4 374.1,291.5 383.2,289.0 392.3,291.5 401.4,293.7 410.6,294.3 419.7,289.8 428.8,293.2 437.9,294.0 447.0,291.9 456.2,293.7 465.3,295.2 474.4,298.1 483.5,297.2 492.6,295.2 501.8,303.3 510.9,299.8 520.0,303.9"/>
+<circle class="dot ring s3" cx="520.0" cy="303.9" r="4"><title>Pretrained, 1e-4: 0.0138 at step 10,000</title></circle>
+<text class="value" x="532.0" y="307.9">0.0138</text>
+<text class="label" x="584.0" y="307.9">Pretrained, 1e-4</text>
+</svg>
