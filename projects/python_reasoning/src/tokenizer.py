@@ -1,12 +1,13 @@
 import itertools
-import os
 from typing import Any
 
 from datasets import Dataset
+from mlcore import runs
+from mlcore import tokenizer as tokenizer_utils
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, processors, trainers
 from transformers import PreTrainedTokenizerFast
 
-from src import data, utils
+from src import data
 
 
 def create_tokenizer(
@@ -66,27 +67,5 @@ def create_tokenizer(
     )
 
 
-def save_tokenizer(tokenizer: PreTrainedTokenizerFast, dir: str) -> None:
-    tokenizer.save_pretrained(f"{dir}/tokenizer")
-
-
-def load_tokenizer(dir: str) -> PreTrainedTokenizerFast:
-    if not os.path.isdir(f"{dir}/tokenizer"):
-        raise FileNotFoundError(
-            f"No tokenizer in {dir} — run `python -m scripts.tokenizer` for this config first."
-        )
-    return PreTrainedTokenizerFast.from_pretrained(f"{dir}/tokenizer")
-
-
-def get_tokenizer(ds: dict[str, Dataset], config: utils.Config) -> PreTrainedTokenizerFast:
-    tokenizer_config = config["tokenizer"]
-    run_path = utils.get_run_path(config)
-    tokenizer_path = f"{run_path}/tokenizer"
-
-    if os.path.isdir(tokenizer_path):
-        return load_tokenizer(run_path)
-
-    tokenizer = create_tokenizer(ds, tokenizer_config)
-    save_tokenizer(tokenizer, run_path)
-
-    return tokenizer
+def get_tokenizer(ds: dict[str, Dataset], config: runs.Config) -> PreTrainedTokenizerFast:
+    return tokenizer_utils.get_tokenizer(ds, config, create_tokenizer)

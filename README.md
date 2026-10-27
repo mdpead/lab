@@ -7,19 +7,41 @@ the projects built on it.
 
 ```
 lab/
-  mlcore/        shared library: layers, kernels, training loop, generation, config (planned)
+  mlcore/        shared library: layers, models, kernels, training, generation, samplers
+  tests/         mlcore's tests
   projects/
     en_cy_translation/   English → Welsh neural machine translation
     python_reasoning/    a language model trained to trace and predict Python execution
 ```
 
-Each project keeps its own README, configs, scripts and tests. Run a project from its folder:
+Each project keeps its own README, configs, scripts and tests. Run a project from its folder;
+its `requirements.txt` installs `mlcore` from the repo root in editable mode:
 
 ```bash
 cd projects/python_reasoning
 pip install -r requirements.txt
 pytest
 ```
+
+To work on `mlcore` itself, from the repo root:
+
+```bash
+pip install -r requirements.txt
+pytest                       # tests that build a model or call a Triton kernel need CUDA
+```
+
+## mlcore
+
+| Module | Contents |
+|---|---|
+| `mlcore.layers` | Grouped-query attention, RoPE, RMSNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
+| `mlcore.models.decoder_only` | The decoder-only Transformer and `build_transformer` |
+| `mlcore.kernels` | Triton flash attention (forward and backward), plus reference add and matmul kernels |
+| `mlcore.generation` | Batched greedy and sampled decoding with a KV cache |
+| `mlcore.training` | Checkpoints, exact resume, seeding a stage from another, LR schedules, `train()` around a project's loop |
+| `mlcore.data.samplers` | Resumable infinite and token-budget samplers |
+| `mlcore.runs` | Run and stage directories, config fingerprints that clear stale stages, logging |
+| `mlcore.tokenizer` | Saving, loading and caching a trained tokenizer |
 
 ## Projects
 
@@ -34,6 +56,6 @@ Both projects were brought in with their full commit history.
 
 1. Bring both projects in unchanged.
 2. Extract the shared code (layers, kernels, training loop, generation, run management) into
-   `mlcore`, starting from `python_reasoning`.
+   `mlcore`, starting from `python_reasoning`. **Done**: moved without changing behaviour.
 3. Move `en_cy_translation` onto `mlcore` and the newer dependencies.
 4. Define models and training stages in config, with components chosen from a registry.

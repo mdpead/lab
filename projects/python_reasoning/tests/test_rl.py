@@ -7,8 +7,9 @@ hits about half the time: whether its one generated token starts with a space.
 import pytest
 import torch
 import torch.nn.functional as F
+from mlcore import training
 
-from src import rl, train
+from src import rl
 from src.dataloader import create_dataloaders_rl
 
 DEV = "cuda"
@@ -92,7 +93,7 @@ def _run(
     ]
     dataloaders = create_dataloaders_rl({"train": rows, "test": rows}, tokenizer, config)
 
-    _, optimiser, lr_scheduler, scaler = train.create_training_objects(
+    _, optimiser, lr_scheduler, scaler = training.create_training_objects(
         model, train_config, tokenizer
     )
     run = {
@@ -326,7 +327,7 @@ def test_token_budget_chunks_keeps_an_oversized_row_and_defaults_to_one_chunk():
 
 def test_chunked_rescore_gives_the_single_pass_gradient(fresh_model, tokenizer):
     """Splitting the rescore to fit a token budget changes peak memory, not the update."""
-    from src import generation
+    from mlcore import generation
 
     prompts = [
         p for p in ["hello", "the quick brown fox jumps over", "foo bar baz"] for _ in range(4)
@@ -376,7 +377,7 @@ def test_pooled_minibatches_give_the_gradient_of_training_on_each(fresh_model, t
 
     The two minibatches decode to different widths, so pooling has to pad one.
     """
-    from src import generation
+    from mlcore import generation
 
     torch.manual_seed(0)
     minibatches = []

@@ -7,12 +7,12 @@ from typing import Any
 
 import datasets as hf_datasets
 import numpy as np
+from mlcore.runs import Config
 from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerFast
 
 from src import synth
-from src.utils import Config
 
 # StarCoder prefixes ~48% of files with metadata markers; they don't parse until removed.
 # Anchored to the file start, and needs the newline so marker-only files are left alone.

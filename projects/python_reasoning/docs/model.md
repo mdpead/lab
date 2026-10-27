@@ -11,7 +11,7 @@ A decoder-only transformer. The `base` configuration is 352M parameters (213M ac
 
 ### The attention kernel
 
-`src/kernels/flash_attention.py` is a flash attention written in [Triton](https://github.com/triton-lang/triton), forward and backward, used for both training and generation.
+[`mlcore/kernels/flash_attention.py`](../../../mlcore/kernels/flash_attention.py) is a flash attention written in [Triton](https://github.com/triton-lang/triton), forward and backward, used for both training and generation.
 
 - Never materialises the full score matrix: it works in tiles with an online softmax.
 - Understands grouped-query attention directly, so keys and values are never expanded to the query head count.
@@ -50,5 +50,5 @@ What these numbers do and do not show:
 - They do not cover the backward pass, memory use, or the model's real shapes.
 - They do not measure the two features in the table that the built-in lacks. Avoiding the repeat of keys and values under grouped-query attention, and avoiding a mask tensor for padded batches, are where the kernel should gain most in the actual model, and neither is benchmarked yet.
 
-Reproduce with `pytest tests/test_flash_attention_perf.py --benchmark -s`.
+Reproduce with `pytest tests/test_flash_attention_perf.py --benchmark -s`, run from the repo root.
 

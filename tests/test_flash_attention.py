@@ -7,7 +7,7 @@ than the same reference maths in the same precision.
 import pytest
 import torch
 
-from src.kernels.flash_attention import flash_attention
+from mlcore.kernels.flash_attention import flash_attention
 
 pytestmark = pytest.mark.cuda
 

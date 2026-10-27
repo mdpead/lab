@@ -8,7 +8,7 @@ import pytest
 import torch
 import triton
 
-from src.kernels.flash_attention import flash_attention_forward
+from mlcore.kernels.flash_attention import flash_attention_forward
 
 pytestmark = pytest.mark.cuda
 

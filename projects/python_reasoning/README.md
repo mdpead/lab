@@ -4,7 +4,7 @@
 
 A language model built from scratch and trained through three stages on a single 16 GB GPU: pretraining on Python source, supervised fine-tuning to trace small programs step by step, and reinforcement learning with rewards checked by actually running the program.
 
-Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written in this repo, with tests.
+Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written from scratch, with tests: the shared parts in [`mlcore`](../../mlcore), the library at the root of this repo, and the rest in this project.
 
 > **Status:** the full pipeline has been run end to end at full size, and every stage is tested. Pretraining adds about 3 points of accuracy over training from scratch, provided the fine-tuning learning rate is kept high. RL helped on one of three tasks.
 
@@ -91,6 +91,8 @@ Full tables, per-step curves and failure analysis are in [docs/results.md](docs/
 
 Requires Linux, an NVIDIA GPU with CUDA, and Python 3.13. Developed on an RTX 5070 Ti (16 GB) with PyTorch 2.12 and Triton 3.7.
 
+Run everything from this folder. `requirements.txt` also installs `mlcore` from the repo root.
+
 ```bash
 pip install -r requirements.txt
 
@@ -135,12 +137,18 @@ The evaluation draws its functions from a seed no stage trains on, and keeps onl
 ### Tests
 
 ```bash
-pytest                                                      # 241 tests with CUDA, 101 without
-pytest tests/test_flash_attention_perf.py --benchmark -s    # kernel timings
+pytest                                                      # 92 tests with CUDA, 75 without
 ruff check . && ruff format --check .                       # lint and formatting
 ```
 
-Tests that build a model or call the Triton kernels are marked `cuda` and skipped without a GPU. The rest, covering program generation, data preparation, sampling and reward scoring, run on CPU in a few seconds.
+Tests that build a model are marked `cuda` and skipped without a GPU. The rest, covering program generation, data preparation, sampling and reward scoring, run on CPU in a few seconds.
+
+The model, kernel, generation and training tests live with `mlcore`. From the repo root:
+
+```bash
+pytest                                                      # 149 tests with CUDA, 26 without
+pytest tests/test_flash_attention_perf.py --benchmark -s    # kernel timings
+```
 
 ## Layout
 
@@ -148,16 +156,28 @@ Tests that build a model or call the Triton kernels are marked `cuda` and skippe
 configs/        YAML configs: test (tiny), base (16 GB card), base_lr3, sft_only, input, search, search_lr3, search_closest
 scripts/        One entry point per stage, plus evaluation, comparison and charts
 src/
-  model.py        Transformer, GQA, RoPE, mixture of experts
-  kernels/        Triton kernels, including flash attention forward and backward
   synth.py        Function generator, tracer, and answer checkers
   data.py         Datasets for each stage and their train/test splits
-  dataloader.py   Token-budget and prompt-count samplers, collation
-  generation.py   Batched sampling with a KV cache
-  train.py        Pretrain/SFT loop, checkpoints, resume, schedules
+  dataloader.py   Prompt-count sampler, collation, and each stage's loaders
+  tokenizer.py    Byte-level BPE with digit splitting and reasoning markers
+  train.py        Pretrain/SFT loop and validation
   rl.py           GRPO loop and RL validation
 docs/           Results, model and kernel, RL loop, lessons learned
 tests/          One file per module
+```
+
+The shared code lives in [`mlcore`](../../mlcore) at the repo root:
+
+```
+mlcore/
+  layers/               GQA, RoPE, RMSNorm, SwiGLU, mixture of experts
+  models/decoder_only   The Transformer and build_transformer
+  kernels/              Triton kernels, including flash attention forward and backward
+  generation.py         Batched sampling with a KV cache
+  training.py           Checkpoints, resume, stage seeding, LR schedules
+  data/samplers.py      Resumable infinite and token-budget samplers
+  runs.py               Run and stage directories, config fingerprints, logging
+  tokenizer.py          Saving, loading and caching a trained tokenizer
 ```
 
 ## Limitations and next steps
