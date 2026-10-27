@@ -10,7 +10,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from src.generation import generate, generate_texts, make_kv_cache
+from mlcore.generation import generate, generate_texts, make_kv_cache
 
 DEV = "cuda"
 

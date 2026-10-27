@@ -5,7 +5,10 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import logging
 
-from src import data, dataloader, model, rl, tokenizer, utils
+from mlcore import runs, tokenizer
+from mlcore.models import decoder_only
+
+from src import data, dataloader, rl
 
 
 # RL on synth tasks: sample rollouts, score by executing them, update on GRPO advantages.
@@ -14,10 +17,10 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    config = utils.parse_config()
-    utils.init_run(config, "rl")
+    config = runs.parse_config()
+    runs.init_run(config, "rl")
 
-    token = tokenizer.load_tokenizer(utils.get_run_path(config))
+    token = tokenizer.load_tokenizer(runs.get_run_path(config))
 
     ds_raw = data.get_dataset_rl(config)
 
@@ -27,7 +30,7 @@ def main() -> None:
 
     dataloaders = dataloader.create_dataloaders_rl(ds, token, config)
 
-    transformer = model.build_transformer(config)
+    transformer = decoder_only.build_transformer(config)
 
     rl.train_rl(
         "rl",
@@ -36,7 +39,7 @@ def main() -> None:
         token,
         config,
         # From SFT: a pretrained model never emits the answer marker, so every reward is 0.
-        init_from=utils.get_stage_path(config, "sft"),
+        init_from=runs.get_stage_path(config, "sft"),
     )
 
 

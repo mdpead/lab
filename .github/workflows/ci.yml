@@ -5,8 +5,8 @@ on:
     branches: [main]
   pull_request:
 
-# Each project runs from its own folder with its own Python and pinned requirements,
-# until they share mlcore and one set of versions.
+# mlcore runs from the repo root; each project runs from its own folder with its own
+# Python and pinned requirements, until they all share one set of versions.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -14,21 +14,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - project: en_cy_translation
-            python: "3.10"
-          - project: python_reasoning
+          - name: mlcore
+            dir: .
+            paths: mlcore tests
             python: "3.13"
+          - name: en_cy_translation
+            dir: projects/en_cy_translation
+            paths: .
+            python: "3.10"
+          - name: python_reasoning
+            dir: projects/python_reasoning
+            paths: .
+            python: "3.13"
+    name: lint (${{ matrix.name }})
     defaults:
       run:
-        working-directory: projects/${{ matrix.project }}
+        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - run: pip install "$(grep '^ruff==' requirements.txt)"
-      - run: ruff check .
-      - run: ruff format --check .
+      - run: ruff check ${{ matrix.paths }}
+      - run: ruff format --check ${{ matrix.paths }}
 
   test:
     runs-on: ubuntu-latest
@@ -36,20 +45,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - project: en_cy_translation
-            python: "3.10"
-          - project: python_reasoning
+          - name: mlcore
+            dir: .
             python: "3.13"
+          - name: en_cy_translation
+            dir: projects/en_cy_translation
+            python: "3.10"
+          - name: python_reasoning
+            dir: projects/python_reasoning
+            python: "3.13"
+    name: test (${{ matrix.name }})
     defaults:
       run:
-        working-directory: projects/${{ matrix.project }}
+        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: projects/${{ matrix.project }}/requirements.txt
+          cache-dependency-path: ${{ matrix.dir }}/requirements.txt
       # CPU build first: the default Linux wheel pulls in several GB of CUDA libraries.
       # GPU tests skip themselves without CUDA.
       - run: pip install "$(grep '^torch==' requirements.txt)" --index-url https://download.pytorch.org/whl/cpu

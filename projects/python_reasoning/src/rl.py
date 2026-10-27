@@ -4,14 +4,15 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from mlcore import generation, training
+from mlcore.data.samplers import resume_at_minibatch
+from mlcore.models.decoder_only import Transformer
+from mlcore.runs import Config
 from torch import Tensor, amp
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
-from src import generation, synth, train
-from src.dataloader import resume_at_minibatch
-from src.model import Transformer
-from src.utils import Config
+from src import synth
 
 # One generation minibatch's rollouts:
 # (token_ids, completion_mask, old_logprobs, seq_starts, advantages)
@@ -253,7 +254,7 @@ def train_loop(
     model: Transformer,
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
-    run: train.Run,
+    run: training.Run,
     config: Config,
 ) -> None:
 
@@ -450,7 +451,7 @@ def train_loop(
 
         # Checkpointing
         if step_no % checkpoint_steps == 0:
-            train.save_checkpoint(
+            training.save_checkpoint(
                 model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
             )
 
@@ -479,7 +480,7 @@ def train_loop(
 
     # A final save when num_steps is not a multiple of checkpoint_steps
     if step_no % checkpoint_steps != 0:
-        train.save_checkpoint(
+        training.save_checkpoint(
             model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
         )
 
@@ -494,5 +495,5 @@ def train_rl(
     config: Config,
     init_from: str | None = None,
 ) -> None:
-    """Run the RL stage: train.train's bookkeeping, this module's loop."""
-    return train.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)
+    """Run the RL stage: training.train's bookkeeping, this module's loop."""
+    return training.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)

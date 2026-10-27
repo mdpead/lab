@@ -2,6 +2,7 @@
 
 import datasets
 import pytest
+from mlcore.data.samplers import TokenSampler
 
 from src import data, dataloader
 
@@ -78,8 +79,8 @@ def test_token_sampler_batches_arrow_and_lists_identically(tokenizer):
     train = ds["train"]
     as_list = [dict(row) for row in train]
 
-    from_arrow = dataloader.TokenSampler(train, 2048, seed=0).batches
-    from_list = dataloader.TokenSampler(as_list, 2048, seed=0).batches
+    from_arrow = TokenSampler(train, 2048, seed=0).batches
+    from_list = TokenSampler(as_list, 2048, seed=0).batches
 
     assert from_arrow == from_list
 

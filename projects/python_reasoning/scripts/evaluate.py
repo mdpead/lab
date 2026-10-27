@@ -10,13 +10,15 @@ from typing import Any
 
 import torch
 import yaml
+from mlcore import generation, runs, tokenizer, training
+from mlcore.models import decoder_only
 
-from src import data, generation, model, rl, tokenizer, train, utils
+from src import data, rl
 
 
 # Greedy pass@1 on a test set larger than RL validation's ~400 prompts.
 # Functions come from a seed no stage trains on; only those on every stage's test side are kept.
-def eval_rows(config: utils.Config, num_records: int, seed: int) -> list[dict[str, Any]]:
+def eval_rows(config: runs.Config, num_records: int, seed: int) -> list[dict[str, Any]]:
     ds_config = {**config["data"]["rl"], "num_records": num_records}
     ratio = min(config["data"]["sft"]["test_split_ratio"], ds_config["test_split_ratio"])
     rows: list[dict[str, Any]] = []
@@ -58,11 +60,11 @@ def main() -> None:
     logging.info(f"eval: {len(rows)} prompts over {num_functions} functions")
 
     device = torch.device(config["train"][args.stage]["device"])
-    transformer = model.build_transformer(config)
-    train.load_model_weights(
-        transformer, utils.get_stage_path(config, args.stage), device, step=args.step
+    transformer = decoder_only.build_transformer(config)
+    training.load_model_weights(
+        transformer, runs.get_stage_path(config, args.stage), device, step=args.step
     )
-    tok = tokenizer.load_tokenizer(utils.get_run_path(config))
+    tok = tokenizer.load_tokenizer(runs.get_run_path(config))
 
     max_new_tokens = config["train"]["rl"]["max_new_tokens"]
     passed: list[bool] = []
@@ -85,7 +87,7 @@ def main() -> None:
         "passed": passed,
         "sources": [data._hash_position(row["source"]) for row in rows],
     }
-    out_dir = f"{utils.get_run_path(config)}/eval"
+    out_dir = f"{runs.get_run_path(config)}/eval"
     os.makedirs(out_dir, exist_ok=True)
     out_path = f"{out_dir}/{args.stage}_{args.step}.json"
     with open(out_path, "w") as f:

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlcore"
+version = "0.1.0"
+description = "From-scratch PyTorch building blocks shared by the projects in this repo"
+requires-python = ">=3.13"
+dependencies = [
+    "torch",
+    "triton; platform_system == 'Linux'",
+    "transformers",
+    "tokenizers",
+    "datasets",
+    "numpy",
+    "PyYAML",
+]
+
+[tool.setuptools.packages.find]
+# The repo root also holds projects/, whose src/ and scripts/ must not be packaged
+include = ["mlcore*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["projects"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# Triton launches use `grid = lambda meta: ...`; kernels keep the paper's names (l, O)
+ignore = ["E731", "E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mlcore"]
+
+[tool.pytest.ini_options]
+# Projects run their own tests from their own folders
+testpaths = ["tests"]

@@ -9,3 +9,5 @@ datasets==5.0.0
 pytest==9.1.1
 ruff==0.17.1
 ipykernel==7.3.0
+# The shared library at the repo root, installed editable. Run pip from this folder.
+-e ../..

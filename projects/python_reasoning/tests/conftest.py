@@ -1,9 +1,8 @@
 import pytest
 import torch
+from mlcore.models.decoder_only import Transformer
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
-
-from src.model import Transformer
 
 
 def pytest_addoption(parser):
