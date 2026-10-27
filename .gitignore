@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+venv/
+
+# Project-specific outputs (checkpoints, data, runs) are ignored by each project's own
+# .gitignore. Patterns like `data/` here would also match mlcore/data/.
