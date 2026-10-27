@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# Attention keeps the paper's names (Q, K, V, O)
+ignore = ["E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
