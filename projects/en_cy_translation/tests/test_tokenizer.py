@@ -23,19 +23,13 @@ def test_decode_roundtrip(tok):
         assert tok.decode(tok(text)["input_ids"], skip_special_tokens=True) == text
 
 
-def test_save_and_load_tokenizer(tmp_path, tok):
-    tokenizer.save_tokenizer(tok, tmp_path)
-    loaded = tokenizer.load_tokenizer(tmp_path)
-    assert loaded("Bore da")["input_ids"] == tok("Bore da")["input_ids"]
-
-
 def test_tokenize_dataset_adds_columns(ds_tokenized, tok):
     row = ds_tokenized["train"][0]
     assert row["text_en_tokenized"] == tok(row["text_en"])["input_ids"]
     assert row["text_cy_tokenized"] == tok(row["text_cy"])["input_ids"]
     assert row["en_token_length"] == len(row["text_en_tokenized"])
     assert row["cy_token_length"] == len(row["text_cy_tokenized"])
-    assert list(ds_tokenized["train"]["idx"]) == list(range(len(ds_tokenized["train"])))
+    assert row["length"] == max(row["en_token_length"], row["cy_token_length"])
 
 
 def test_tokenize_dataset_filters_long_rows(raw_ds, tok, config):
@@ -43,12 +37,11 @@ def test_tokenize_dataset_filters_long_rows(raw_ds, tok, config):
     ds = tokenizer.tokenize_dataset(raw_ds, tok, config)
     assert 0 < len(ds["train"]) < len(raw_ds["train"])
     assert max(list(ds["train"]["en_token_length"]) + list(ds["train"]["cy_token_length"])) <= 5
-    assert list(ds["train"]["idx"]) == list(range(len(ds["train"])))
 
 
 def test_get_tokenizer_saves_then_reuses(raw_ds, config, monkeypatch):
     first = tokenizer.get_tokenizer(raw_ds, config)
-    assert os.path.isdir(f"{config['locations']['runs_dir']}/pytest/tokenizer")
+    assert os.path.isdir(f"{config['locations']['models_dir']}/pytest/tokenizer")
 
     def fail(*args, **kwargs):
         raise AssertionError("tokenizer should be loaded, not retrained")

@@ -1,29 +1,31 @@
-import argparse
 import logging
 
-import yaml
+from mlcore import runs
+from mlcore.models import encoder_decoder
 
-from src import dataloader, datasets, model, tokenizer, train, utils
+from src import dataloader, datasets, tokenizer, train
 
-logging.basicConfig(level=logging.INFO)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--config", required=True, help="Config name (e.g. base, test)")
-args = parser.parse_args()
+# Everything runs under a __main__ guard, because DataLoader workers re-import this module
+def main() -> None:
 
-with open(f"configs/{args.config}.yaml") as f:
-    config = yaml.safe_load(f)
+    logging.basicConfig(level=logging.INFO)
 
-utils.init_run(config)
+    config = runs.parse_config()
+    runs.init_run(config, train.STAGE)
 
-ds_raw = datasets.get_dataset("train", config)
+    ds_raw = datasets.get_dataset(train.STAGE, config)
 
-token = tokenizer.get_tokenizer(ds_raw, config)
+    token = tokenizer.get_tokenizer(ds_raw, config)
 
-ds_tokenized = tokenizer.tokenize_dataset(ds_raw, token, config)
+    ds_tokenized = tokenizer.tokenize_dataset(ds_raw, token, config)
 
-dataloaders = dataloader.create_dataloaders(ds_tokenized, config)
+    dataloaders = dataloader.create_dataloaders(ds_tokenized, config, train.STAGE)
 
-transformer = model.build_transformer(config)
+    transformer = encoder_decoder.build_transformer(config)
 
-train.train(transformer, dataloaders, token, config)
+    train.train(transformer, dataloaders, token, config)
+
+
+if __name__ == "__main__":
+    main()

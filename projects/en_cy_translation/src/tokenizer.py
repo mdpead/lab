@@ -1,7 +1,8 @@
 import itertools
-import os
 from typing import Any
 
+from mlcore import runs
+from mlcore import tokenizer as tokenizer_utils
 from tokenizers import (
     Tokenizer,
     decoders,
@@ -14,7 +15,6 @@ from tokenizers import (
 from transformers import PreTrainedTokenizerFast
 
 from datasets import DatasetDict
-from src import utils
 
 
 def create_tokenizer(ds: DatasetDict, tokenizer_config: dict[str, Any]) -> PreTrainedTokenizerFast:
@@ -48,14 +48,6 @@ def create_tokenizer(ds: DatasetDict, tokenizer_config: dict[str, Any]) -> PreTr
     )
 
 
-def save_tokenizer(tokenizer: PreTrainedTokenizerFast, dir: str) -> None:
-    tokenizer.save_pretrained(f"{dir}/tokenizer")
-
-
-def load_tokenizer(dir: str) -> PreTrainedTokenizerFast:
-    return PreTrainedTokenizerFast.from_pretrained(f"{dir}/tokenizer")
-
-
 def _tokenize_text(
     text: dict[str, list[str]], tokenizer: PreTrainedTokenizerFast
 ) -> dict[str, list[list[int]]]:
@@ -73,26 +65,16 @@ def tokenize_dataset(
         lambda row: {
             "en_token_length": len(row["text_en_tokenized"]),
             "cy_token_length": len(row["text_cy_tokenized"]),
+            # Source and target pad separately, so the longer side sets a row's cost
+            "length": max(len(row["text_en_tokenized"]), len(row["text_cy_tokenized"])),
         },
     )
     max_length = config["model"]["max_length"]
     ds = ds.filter(
         lambda x: (x["en_token_length"] <= max_length) and (x["cy_token_length"] <= max_length)
     )
-    ds = ds.map(lambda _, idx: {"idx": idx}, with_indices=True)
     return ds
 
 
-def get_tokenizer(ds: DatasetDict, config: dict[str, Any]) -> PreTrainedTokenizerFast:
-
-    tokenizer_config = config["tokenizer"]
-    run_path = utils.get_run_path(config)
-    tokenizer_path = f"{run_path}/tokenizer"
-
-    if os.path.isdir(tokenizer_path):
-        return load_tokenizer(run_path)
-
-    tokenizer = create_tokenizer(ds, tokenizer_config)
-    save_tokenizer(tokenizer, run_path)
-
-    return tokenizer
+def get_tokenizer(ds: DatasetDict, config: runs.Config) -> PreTrainedTokenizerFast:
+    return tokenizer_utils.get_tokenizer(ds, config, create_tokenizer)

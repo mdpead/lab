@@ -11,22 +11,24 @@ model:
   dropout: 0.1
 
 train:
-  effective_batch_token_size: 20000
-  minibatch_token_size: 8192
-  learning_rate: 1.0e-4  # 1 / (D_MODEL * WARM_UP_STEPS) ** 0.5
-  adam_betas: [0.9, 0.98]
-  adam_eps: 1.0e-9
-  num_steps: 200
-  label_smoothing: 0.1
-  device: cuda
-  checkpoint_steps: 5
-  warm_up_steps: 5
-  validation_steps: 5
-  validation_batches: 1
-  compile_model: true
+  translation:
+    effective_batch_token_size: 20000
+    minibatch_token_size: 8192
+    learning_rate: 1.0e-4  # 1 / (D_MODEL * WARM_UP_STEPS) ** 0.5
+    adam_betas: [0.9, 0.98]
+    adam_eps: 1.0e-9
+    num_steps: 200
+    label_smoothing: 0.1
+    device: cuda
+    checkpoint_steps: 5
+    keep_checkpoints: 2
+    warm_up_steps: 5
+    validation_steps: 5
+    validation_batches: 1
+    compile_model: true
 
 data:
-  train:
+  translation:
     ds: techiaith/cardiff-university-tm-en-cy
     sample_size: 1000
     test_split_ratio: 0.1
@@ -38,4 +40,4 @@ tokenizer:
 
 locations:
   data_dir: ./data
-  runs_dir: ./runs
+  models_dir: ./models

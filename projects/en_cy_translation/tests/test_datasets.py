@@ -2,12 +2,13 @@ import pytest
 
 from datasets import Dataset, DatasetDict
 from src import datasets
+from src.train import STAGE
 
 
 def test_unknown_dataset_raises(config):
-    config["data"]["train"]["ds"] = "nope/unknown"
+    config["data"][STAGE]["ds"] = "nope/unknown"
     with pytest.raises(ValueError, match="Unknown dataset"):
-        datasets.get_dataset("train", config)
+        datasets.get_dataset(STAGE, config)
 
 
 def test_cardiff_loader_samples_and_splits(config, monkeypatch):
@@ -15,16 +16,16 @@ def test_cardiff_loader_samples_and_splits(config, monkeypatch):
         train=Dataset.from_dict({"text_en": [str(i) for i in range(100)], "text_cy": ["x"] * 100})
     )
     monkeypatch.setattr(datasets.hf_datasets, "load_dataset", lambda name: full)
-    config["data"]["train"]["sample_size"] = 40
+    config["data"][STAGE]["sample_size"] = 40
 
-    ds = datasets.get_dataset("train", config)
+    ds = datasets.get_dataset(STAGE, config)
 
     assert len(ds["train"]) == 30
     assert len(ds["test"]) == 10
     assert set(list(ds["train"]["text_en"]) + list(ds["test"]["text_en"])) == {
         str(i) for i in range(40)
     }
-    assert list(datasets.get_dataset("train", config)["test"]["text_en"]) == list(
+    assert list(datasets.get_dataset(STAGE, config)["test"]["text_en"]) == list(
         ds["test"]["text_en"]
     )
 

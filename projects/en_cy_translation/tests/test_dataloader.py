@@ -3,42 +3,18 @@ import itertools
 import torch
 
 from src import dataloader
+from src.train import STAGE
 
 
-def test_token_sampler_respects_budget_and_covers_all_rows(ds_tokenized):
-    ds = ds_tokenized["train"]
-    budget = 30
-    sampler = dataloader.TokenSampler(ds, budget, seed=0)
-    lengths = {
-        i: max(en, cy) for i, en, cy in zip(ds["idx"], ds["en_token_length"], ds["cy_token_length"])
-    }
+def test_batches_fit_the_padded_token_budget(ds_tokenized, config):
+    budget = config["train"][STAGE]["minibatch_token_size"]
+    loader = dataloader.create_dataloaders(ds_tokenized, config, STAGE)["train"]
 
-    for batch in sampler.batches:
-        assert len(batch) == 1 or sum(lengths[i] for i in batch) <= budget
-
-    flat = [i for batch in sampler.batches for i in batch]
-    assert sorted(flat) == sorted(ds["idx"])
-    assert len(sampler) == len(sampler.batches)
-
-
-def test_token_sampler_oversized_row_gets_own_batch(ds_tokenized):
-    sampler = dataloader.TokenSampler(ds_tokenized["train"], 1, seed=0)
-    assert all(len(batch) == 1 for batch in sampler.batches)
-
-
-def test_token_sampler_iterates_forever_and_is_seeded(ds_tokenized):
-    ds = ds_tokenized["train"]
-    n = len(dataloader.TokenSampler(ds, 30, seed=0))
-
-    def take(seed):
-        return list(itertools.islice(iter(dataloader.TokenSampler(ds, 30, seed=seed)), 3 * n))
-
-    assert take(0) == take(0)
-    assert take(0) != take(1)
-    first_epoch = take(0)[:n]
-    assert sorted(map(tuple, first_epoch)) == sorted(
-        map(tuple, dataloader.TokenSampler(ds, 30, seed=0).batches)
-    )
+    for batch in itertools.islice(loader, 20):
+        rows = batch["src_input_ids"].shape[0]
+        # Each side pads to its own longest row; the batch is costed by the longer side
+        longest = max(batch["src_input_ids"].shape[1], batch["tgt_input_ids"].shape[1] + 1)
+        assert rows == 1 or rows * longest <= budget
 
 
 def test_collate_batch_pads_and_shifts_target():
@@ -77,7 +53,7 @@ def test_make_collate_fn(ds_tokenized):
 
 
 def test_create_dataloaders(ds_tokenized, config):
-    loaders = dataloader.create_dataloaders(ds_tokenized, config)
+    loaders = dataloader.create_dataloaders(ds_tokenized, config, STAGE)
     assert set(loaders) == {"train", "test"}
     batch = next(iter(loaders["train"]))
     assert (
