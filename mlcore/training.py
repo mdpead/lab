@@ -12,13 +12,12 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from mlcore import runs
-from mlcore.models.decoder_only import Transformer
 
 
 class Run(TypedDict):
     """A stage's training state, fresh from create_run or resumed by load_run."""
 
-    model: Transformer
+    model: nn.Module
     criterion: nn.CrossEntropyLoss
     optimiser: Optimizer
     lr_scheduler: LRScheduler
@@ -30,7 +29,7 @@ class Run(TypedDict):
 
 # A stage's training loop, as train() calls it
 TrainLoop = Callable[
-    [str, Transformer, dict[str, DataLoader], PreTrainedTokenizerFast, Run, runs.Config], None
+    [str, nn.Module, dict[str, DataLoader], PreTrainedTokenizerFast, Run, runs.Config], None
 ]
 
 
@@ -116,7 +115,7 @@ def _prune_checkpoints(checkpoints_path: str, keep: int | None) -> None:
 
 
 def save_checkpoint(
-    model: Transformer,
+    model: nn.Module,
     optimiser: Optimizer,
     lr_scheduler: LRScheduler,
     scaler: amp.GradScaler,
@@ -159,7 +158,7 @@ def load_checkpoint(
 
 
 def create_training_objects(
-    model: Transformer, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
+    model: nn.Module, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
 ) -> tuple[nn.CrossEntropyLoss, Optimizer, LRScheduler, amp.GradScaler]:
 
     device = torch.device(train_config["device"])
@@ -188,7 +187,7 @@ def create_training_objects(
 
 
 def create_run(
-    model: Transformer, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
+    model: nn.Module, train_config: dict[str, Any], tokenizer: PreTrainedTokenizerFast
 ) -> Run:
     results: list[dict[str, Any]] = []
 
@@ -212,7 +211,7 @@ def create_run(
 
 def load_run(
     run_path: str,
-    model: Transformer,
+    model: nn.Module,
     train_config: dict[str, Any],
     tokenizer: PreTrainedTokenizerFast,
 ) -> Run:
@@ -251,7 +250,7 @@ def load_run(
 
 
 def load_model_weights(
-    model: Transformer, from_path: str, device: torch.device, step: int | None = None
+    model: nn.Module, from_path: str, device: torch.device, step: int | None = None
 ) -> int:
     """Start a stage from another stage's weights: parameters only.
 
@@ -283,7 +282,7 @@ def load_model_weights(
 
 def get_run(
     run_path: str,
-    model: Transformer,
+    model: nn.Module,
     train_config: dict[str, Any],
     tokenizer: PreTrainedTokenizerFast,
     init_from: str | None = None,
@@ -307,7 +306,7 @@ def get_run(
 
 def train(
     stage: str,
-    model: Transformer,
+    model: nn.Module,
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,

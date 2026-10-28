@@ -1,9 +1,8 @@
 import re
 
 import torch
+from mlcore.models.encoder_decoder import Transformer
 from transformers import PreTrainedTokenizerBase
-
-from src.model import Transformer
 
 
 def generate_texts(

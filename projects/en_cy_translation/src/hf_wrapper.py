@@ -1,12 +1,11 @@
-import os
 from typing import Any
 
 import torch
 import torch.nn as nn
+from mlcore import runs, training
+from mlcore.models.encoder_decoder import Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
-
-from src.model import Transformer
 
 
 class EnCyConfig(PretrainedConfig):
@@ -157,10 +156,9 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
         }
 
     @classmethod
-    def from_run(cls, run_path: str) -> "EnCyForTranslation":
-        from src.utils import load_config
-
-        config_dict = load_config(run_path)
+    def from_run(cls, stage_path: str) -> "EnCyForTranslation":
+        """Load the latest checkpoint of a training stage, e.g. models/base/translation."""
+        config_dict = runs.load_config(stage_path)
         model_cfg = config_dict["model"]
         hf_config = EnCyConfig(
             vocab_size=config_dict["tokenizer"]["vocab_size"],
@@ -173,8 +171,9 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
             dropout=model_cfg["dropout"],
         )
         model = cls(hf_config)
-        checkpoints_dir = f"{run_path}/checkpoints"
-        latest = max(int(f.split(".")[0]) for f in os.listdir(checkpoints_dir) if f.endswith(".pt"))
-        checkpoint = torch.load(f"{checkpoints_dir}/{latest}.pt", map_location="cpu")
+        steps = training.checkpoint_steps_on_disk(f"{stage_path}/checkpoints")
+        if not steps:
+            raise FileNotFoundError(f"No checkpoints found in {stage_path}")
+        checkpoint = training.load_checkpoint(stage_path, steps[-1], torch.device("cpu"))
         model.transformer.load_state_dict(checkpoint["model_state_dict"])
         return model

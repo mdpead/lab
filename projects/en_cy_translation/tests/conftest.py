@@ -2,9 +2,11 @@ import copy
 
 import pytest
 import torch
+from mlcore.models import encoder_decoder
 
 from datasets import Dataset, DatasetDict
-from src import model, tokenizer
+from src import tokenizer
+from src.train import STAGE
 
 PAIRS = [
     ("Hello, how are you?", "Helo, sut wyt ti?"),
@@ -30,30 +32,32 @@ BASE_CONFIG = {
         "dropout": 0.1,
     },
     "train": {
-        "effective_batch_token_size": 40,
-        "minibatch_token_size": 20,
-        "learning_rate": 1.0e-3,
-        "adam_betas": [0.9, 0.98],
-        "adam_eps": 1.0e-9,
-        "num_steps": 4,
-        "label_smoothing": 0.1,
-        "device": "cpu",
-        "checkpoint_steps": 2,
-        "warm_up_steps": 2,
-        "validation_steps": 2,
-        "validation_batches": 1,
-        "compile_model": False,
+        STAGE: {
+            "effective_batch_token_size": 40,
+            "minibatch_token_size": 20,
+            "learning_rate": 1.0e-3,
+            "adam_betas": [0.9, 0.98],
+            "adam_eps": 1.0e-9,
+            "num_steps": 4,
+            "label_smoothing": 0.1,
+            "device": "cpu",
+            "checkpoint_steps": 2,
+            "warm_up_steps": 2,
+            "validation_steps": 2,
+            "validation_batches": 1,
+            "compile_model": False,
+        },
     },
-    "data": {"train": {"ds": "techiaith/cardiff-university-tm-en-cy", "test_split_ratio": 0.25}},
+    "data": {STAGE: {"ds": "techiaith/cardiff-university-tm-en-cy", "test_split_ratio": 0.25}},
     "tokenizer": {"vocab_size": 200, "pad_token_id": 2, "training_size": 1000},
-    "locations": {"data_dir": "./data", "runs_dir": "./runs"},
+    "locations": {"data_dir": "./data", "models_dir": "./models"},
 }
 
 
 @pytest.fixture
 def config(tmp_path):
     config = copy.deepcopy(BASE_CONFIG)
-    config["locations"]["runs_dir"] = str(tmp_path / "runs")
+    config["locations"]["models_dir"] = str(tmp_path / "models")
     config["locations"]["data_dir"] = str(tmp_path / "data")
     return config
 
@@ -87,4 +91,4 @@ def ds_tokenized(raw_ds, tok, config):
 def transformer(config, tok):
     torch.manual_seed(0)
     config["tokenizer"]["vocab_size"] = len(tok)
-    return model.build_transformer(config)
+    return encoder_decoder.build_transformer(config)

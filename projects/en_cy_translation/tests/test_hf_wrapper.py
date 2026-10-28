@@ -2,9 +2,11 @@ import os
 
 import pytest
 import torch
+from mlcore import runs, training
 
-from src import generation, train, utils
+from src import generation
 from src.hf_wrapper import EnCyConfig, EnCyForTranslation
+from src.train import STAGE
 
 
 def make_hf_model(config, transformer):
@@ -125,35 +127,33 @@ def test_save_and_load_pretrained_default_max_length(tmp_path, config, transform
     assert_roundtrip(tmp_path, make_hf_model(config, transformer))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="save_pretrained moves a non-default max_length into generation_config.json, "
-    "so it reloads as None",
-)
 def test_save_and_load_pretrained_custom_max_length(tmp_path, config, transformer):
     assert_roundtrip(tmp_path, make_hf_model(config, transformer))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="README usage: the tokenizer returns token_type_ids, which generate() rejects",
-)
 def test_generate_accepts_tokenizer_output(config, transformer, tok):
+    """The README's usage: tokenizer output straight into generate."""
     hf_model = make_hf_model(config, transformer)
     inputs = tok("Good morning", return_tensors="pt")
     hf_model.generate(**inputs, max_length=12)
 
 
-def test_from_run_loads_latest_checkpoint(config, transformer):
-    run_path = utils.init_run(config)
-    run = train.create_run(transformer, config)
-    args = run["optimiser"], run["lr_scheduler"], run["scaler"], run_path
-    train.save_checkpoint(torch.nn.Linear(1, 1), *args, 1, [])
-    train.save_checkpoint(transformer, *args, 10, [])
-    train.save_checkpoint(torch.nn.Linear(1, 1), *args, 9, [])
-    assert sorted(os.listdir(f"{run_path}/checkpoints")) == ["1.pt", "10.pt", "9.pt"]
+def test_from_run_loads_latest_checkpoint(config, transformer, tok):
+    stage_path = runs.init_run(config, STAGE)
+    run = training.create_run(transformer, config["train"][STAGE], tok)
+    args = run["optimiser"], run["lr_scheduler"], run["scaler"], stage_path
+    training.save_checkpoint(torch.nn.Linear(1, 1), *args, 1, [])
+    training.save_checkpoint(transformer, *args, 10, [])
+    training.save_checkpoint(torch.nn.Linear(1, 1), *args, 9, [])
+    assert sorted(os.listdir(f"{stage_path}/checkpoints")) == ["1.pt", "10.pt", "9.pt"]
 
-    hf_model = EnCyForTranslation.from_run(run_path)
+    hf_model = EnCyForTranslation.from_run(stage_path)
 
     for key, value in transformer.state_dict().items():
         assert torch.equal(hf_model.transformer.state_dict()[key], value)
+
+
+def test_from_run_without_checkpoints_raises(config):
+    stage_path = runs.init_run(config, STAGE)
+    with pytest.raises(FileNotFoundError):
+        EnCyForTranslation.from_run(stage_path)

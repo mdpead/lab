@@ -11,6 +11,7 @@ from datasets import load_dataset
 sys.path.insert(0, ".")
 
 from src import datasets as ds_module
+from src.train import STAGE
 
 N = 8  # n-gram length for partial-overlap detection
 COVERAGE_THRESHOLD = 0.5
@@ -35,7 +36,7 @@ def ngrams(tokens: list[str]) -> set[str]:
 with open(f"configs/{args.config}.yaml") as f:
     config = yaml.safe_load(f)
 
-train = ds_module.get_dataset("train", config)["train"]
+train = ds_module.get_dataset(STAGE, config)["train"]
 print(f"Training split: {len(train)} pairs")
 
 flores = load_dataset("openlanguagedata/flores_plus")["devtest"]

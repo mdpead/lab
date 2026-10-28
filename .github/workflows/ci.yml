@@ -6,7 +6,7 @@ on:
   pull_request:
 
 # mlcore runs from the repo root; each project runs from its own folder with its own
-# Python and pinned requirements, until they all share one set of versions.
+# pinned requirements, which install mlcore from the root.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -21,7 +21,7 @@ jobs:
           - name: en_cy_translation
             dir: projects/en_cy_translation
             paths: .
-            python: "3.10"
+            python: "3.13"
           - name: python_reasoning
             dir: projects/python_reasoning
             paths: .
@@ -50,7 +50,7 @@ jobs:
             python: "3.13"
           - name: en_cy_translation
             dir: projects/en_cy_translation
-            python: "3.10"
+            python: "3.13"
           - name: python_reasoning
             dir: projects/python_reasoning
             python: "3.13"

@@ -4,10 +4,10 @@ from torch.nn import functional as F
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int) -> None:
+    def __init__(self, d_model: int, d_ff: int, bias: bool = False) -> None:
         super().__init__()
-        self.linear1 = nn.Linear(d_model, d_ff, bias=False)
-        self.linear2 = nn.Linear(d_ff, d_model, bias=False)
+        self.linear1 = nn.Linear(d_model, d_ff, bias=bias)
+        self.linear2 = nn.Linear(d_ff, d_model, bias=bias)
         self.relu = nn.ReLU()
 
     def forward(self, x: Tensor) -> Tensor:

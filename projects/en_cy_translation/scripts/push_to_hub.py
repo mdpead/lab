@@ -8,10 +8,11 @@ import yaml
 sys.path.insert(0, ".")
 
 from huggingface_hub import HfApi
+from mlcore import runs
+from mlcore.tokenizer import load_tokenizer
 
 from src.hf_wrapper import EnCyForTranslation
-from src.tokenizer import load_tokenizer
-from src.utils import get_run_path
+from src.train import STAGE
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", required=True, help="Config name (e.g. base)")
@@ -21,12 +22,13 @@ args = parser.parse_args()
 with open(f"configs/{args.config}.yaml") as f:
     config = yaml.safe_load(f)
 
-run_path = get_run_path(config)
+run_path = runs.get_run_path(config)
+stage_path = runs.get_stage_path(config, STAGE)
 tmp_path = "/tmp/hf_push"
 os.makedirs(tmp_path, exist_ok=True)
 
-print(f"Loading model from {run_path}...")
-model = EnCyForTranslation.from_run(run_path)
+print(f"Loading model from {stage_path}...")
+model = EnCyForTranslation.from_run(stage_path)
 tokenizer = load_tokenizer(run_path)
 
 print("Saving HF format...")
@@ -34,8 +36,8 @@ model.save_pretrained(tmp_path)
 tokenizer.save_pretrained(tmp_path)
 
 shutil.copy("README.md", f"{tmp_path}/README.md")
+# For reference only: loading needs this project and mlcore installed
 shutil.copy("src/hf_wrapper.py", f"{tmp_path}/hf_wrapper.py")
-shutil.copy("src/model.py", f"{tmp_path}/model.py")
 
 print(f"Pushing to {args.repo}...")
 api = HfApi()

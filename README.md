@@ -34,8 +34,9 @@ pytest                       # tests that build a model or call a Triton kernel 
 
 | Module | Contents |
 |---|---|
-| `mlcore.layers` | Grouped-query attention, RoPE, RMSNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
+| `mlcore.layers` | Grouped-query and multi-head attention, RoPE and sinusoidal positions, RMSNorm and LayerNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
 | `mlcore.models.decoder_only` | The decoder-only Transformer and `build_transformer` |
+| `mlcore.models.encoder_decoder` | The post-norm encoder-decoder Transformer and `build_transformer` |
 | `mlcore.kernels` | Triton flash attention (forward and backward), plus reference add and matmul kernels |
 | `mlcore.generation` | Batched greedy and sampled decoding with a KV cache |
 | `mlcore.training` | Checkpoints, exact resume, seeding a stage from another, LR schedules, `train()` around a project's loop |
@@ -57,5 +58,6 @@ Both projects were brought in with their full commit history.
 1. Bring both projects in unchanged.
 2. Extract the shared code (layers, kernels, training loop, generation, run management) into
    `mlcore`, starting from `python_reasoning`. **Done**: moved without changing behaviour.
-3. Move `en_cy_translation` onto `mlcore` and the newer dependencies.
+3. Move `en_cy_translation` onto `mlcore` and the newer dependencies. **Done**: the published
+   model gives the same translations.
 4. Define models and training stages in config, with components chosen from a registry.

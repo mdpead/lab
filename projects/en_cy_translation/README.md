@@ -103,6 +103,11 @@ FLORES+ devtest has been checked against the Cardiff training split on both the 
 
 ## Setup
 
+This project lives in the [lab](../../README.md) monorepo and builds on its shared `mlcore`
+library: the Transformer is `mlcore.models.encoder_decoder`, and checkpointing, resume and
+run directories come from `mlcore.training` and `mlcore.runs`. Python 3.13; run pip from this
+folder so `mlcore` installs from the repo root:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -110,10 +115,13 @@ pip install -r requirements.txt
 ```
 
 ```bash
-python scripts/train.py --config base
+python -m scripts.train --config base
 ```
 
-Checkpoints are saved to `runs/<run-name>/checkpoints/` every `checkpoint_steps` steps. Training resumes automatically from the latest checkpoint.
+Checkpoints are saved to `models/<run-name>/translation/checkpoints/` every `checkpoint_steps`
+steps, and training resumes automatically from the latest one. Changing a setting that the
+checkpoints depend on (the model, tokenizer, or the stage's training and data settings) clears
+the stage and starts again.
 
 ```bash
 pytest                                  # tests, CPU only
@@ -129,11 +137,10 @@ ruff check . && ruff format --check .   # lint and formatting
 │   ├── check_overlap.py  # FLORES+ / training data overlap check
 │   └── push_to_hub.py
 └── src/
-    ├── model.py      # Transformer implementation
     ├── tokenizer.py  # WordPiece tokenizer
     ├── datasets.py   # Dataset loading
-    ├── dataloader.py # Token-bucketed DataLoader
-    ├── train.py      # Training loop and checkpointing
+    ├── dataloader.py # Collation and token-budget DataLoaders
+    ├── train.py      # Training loop and BLEU validation
     ├── generation.py # Autoregressive decoding
     └── hf_wrapper.py # HuggingFace PreTrainedModel wrapper
 ```
