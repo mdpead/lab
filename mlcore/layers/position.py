@@ -63,3 +63,30 @@ class RotaryPositionalEncoding(nn.Module):
         K_rot = self.rotate(K, cos_thetas, sin_thetas)
 
         return Q_rot, K_rot
+
+
+class SinusoidalPositionalEncoding(nn.Module):
+    """Fixed sin/cos encodings added to the embeddings, as in the original Transformer."""
+
+    def __init__(self, d_model: int, max_length: int) -> None:
+        super().__init__()
+        # Persistent, so it is part of saved checkpoints
+        self.register_buffer("PE", self.create_pe(d_model, max_length))
+
+    @staticmethod
+    def create_pe(d_model: int, max_length: int) -> Tensor:
+        PE = torch.zeros((max_length, d_model))
+        positions = torch.arange(0, max_length)
+        dims = torch.arange(0, d_model // 2)
+
+        evens = torch.sin(positions.unsqueeze(-1) / (10000 ** (2 * dims / d_model)).unsqueeze(0))
+        odds = torch.cos(positions.unsqueeze(-1) / (10000 ** (2 * dims / d_model)).unsqueeze(0))
+
+        PE[:, 0::2] = evens
+        PE[:, 1::2] = odds
+
+        return PE
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = x + self.PE[: x.shape[1], :].unsqueeze(0)
+        return x

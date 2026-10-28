@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch import Tensor, nn
 
@@ -69,3 +71,49 @@ class GroupedQueryAttention(nn.Module):
         kv_new = None if kv_cache is None else torch.stack((k_new, v_new), dim=0)
 
         return O, kv_new
+
+
+class MultiHeadAttention(nn.Module):
+    """Plain multi-head attention with an explicit boolean mask, for self- and cross-attention.
+
+    Masked entries are False in `attn_mask` (batch, q_len, k_len).
+    """
+
+    def __init__(self, d_model: int, num_heads: int, dropout: float) -> None:
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.num_heads = num_heads
+        self.d_h = d_model // num_heads
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, q: Tensor, k: Tensor, v: Tensor, attn_mask: Tensor) -> Tensor:
+        # Create Q,K,V tensors
+        Q = self.W_q(q)
+        K = self.W_k(k)
+        V = self.W_v(v)
+
+        # Split into multi heads (batch_no, num_heads, seq_no, d_h)
+        Q_mh = Q.reshape(Q.shape[0], Q.shape[1], self.num_heads, self.d_h).permute(0, 2, 1, 3)
+        K_mh = K.reshape(K.shape[0], K.shape[1], self.num_heads, self.d_h).permute(0, 2, 1, 3)
+        V_mh = V.reshape(V.shape[0], V.shape[1], self.num_heads, self.d_h).permute(0, 2, 1, 3)
+
+        # Calculate attention matrices
+        attn_raw = torch.matmul(Q_mh, K_mh.transpose(-1, -2)) / math.sqrt(self.d_h)
+        attn_mask_mh = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
+        fill_value = torch.finfo(attn_raw.dtype).min  # works for fp16/bf16/fp32
+        attn_masked = attn_raw.masked_fill(~attn_mask_mh, fill_value)
+        attn = torch.softmax(attn_masked, -1)
+        attn = self.dropout(attn)
+
+        # Apply to value vectors and recombine
+        A_mh = torch.matmul(attn, V_mh)
+        A = A_mh.permute(0, 2, 1, 3).reshape(A_mh.shape[0], A_mh.shape[2], -1)
+
+        # Project out
+        O = self.W_o(A)
+
+        return O

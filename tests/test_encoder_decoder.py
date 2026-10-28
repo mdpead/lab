@@ -1,25 +1,48 @@
+"""The encoder-decoder Transformer and its layers. Runs on CPU."""
+
 import math
 
+import pytest
 import torch
 
-from src import model
+from mlcore.layers import (
+    Embedding,
+    LayerNorm,
+    MultiHeadAttention,
+    PositionWiseFeedForward,
+    SinusoidalPositionalEncoding,
+)
+from mlcore.models import encoder_decoder
+
+CONFIG = {
+    "model": {
+        "d_model": 32,
+        "num_heads": 4,
+        "max_length": 32,
+        "d_ff": 64,
+        "num_enc_layers": 2,
+        "num_dec_layers": 2,
+        "dropout": 0.1,
+    },
+    "tokenizer": {"vocab_size": 60},
+}
 
 
-def test_linear_matches_reference():
-    layer = model.Linear(4, 3)
-    x = torch.randn(2, 4)
-    assert torch.allclose(layer(x), x @ layer.weight.t() + layer.bias)
+@pytest.fixture
+def transformer():
+    torch.manual_seed(0)
+    return encoder_decoder.build_transformer(CONFIG)
 
 
 def test_layer_norm_normalises_last_dim():
     x = torch.randn(3, 5, 16) * 10 + 4
-    out = model.LayerNorm(16)(x)
+    out = LayerNorm(16)(x)
     assert torch.allclose(out.mean(-1), torch.zeros(3, 5), atol=1e-5)
     assert torch.allclose(out.std(-1, unbiased=False), torch.ones(3, 5), atol=1e-4)
 
 
 def test_positional_encoding_values():
-    pe = model.PositionalEncoding(d_model=8, max_length=10).PE
+    pe = SinusoidalPositionalEncoding(d_model=8, max_length=10).PE
     assert pe.shape == (10, 8)
     assert torch.equal(pe[0, 0::2], torch.zeros(4))
     assert torch.equal(pe[0, 1::2], torch.ones(4))
@@ -27,14 +50,23 @@ def test_positional_encoding_values():
     assert math.isclose(pe[3, 3].item(), math.cos(3 / 10000 ** (2 / 8)), rel_tol=1e-5)
 
 
+def test_positional_encoding_is_saved_with_the_weights():
+    assert "PE" in SinusoidalPositionalEncoding(8, 10).state_dict()
+
+
 def test_embedding_is_scaled():
-    emb = model.Embedding(10, 16)
+    emb = Embedding(10, 16)
     assert torch.allclose(emb(torch.tensor([[3]]))[0, 0], emb.E[3] * 4)
+
+
+def test_feedforward_bias_is_optional():
+    assert PositionWiseFeedForward(8, 16).linear1.bias is None
+    assert PositionWiseFeedForward(8, 16, bias=True).linear1.bias is not None
 
 
 def test_attention_ignores_masked_keys():
     torch.manual_seed(0)
-    attn = model.MultiHeadAttention(16, 4, dropout=0.0)
+    attn = MultiHeadAttention(16, 4, dropout=0.0)
     q = torch.randn(1, 3, 16)
     kv = torch.randn(1, 5, 16)
     mask = torch.tensor([[True, True, True, False, False]]).expand(3, -1).unsqueeze(0)
@@ -49,24 +81,24 @@ def test_attention_ignores_masked_keys():
 
 def test_decoder_self_attn_mask_is_causal_and_padded():
     padding = torch.tensor([[True, True, False]])
-    mask = model.Decoder(16, 4, 32, 1, 0.0).make_self_attn_mask(padding, padding)
+    mask = encoder_decoder.Decoder(16, 4, 32, 1, 0.0).make_self_attn_mask(padding, padding)
     assert mask.tolist() == [[[True, False, False], [True, True, False], [False, False, False]]]
 
 
 def test_cross_attn_mask_hides_source_padding():
     tgt = torch.tensor([[True, True]])
     src = torch.tensor([[True, False, False]])
-    mask = model.Decoder(16, 4, 32, 1, 0.0).make_cross_attn_mask(tgt, src)
+    mask = encoder_decoder.Decoder(16, 4, 32, 1, 0.0).make_cross_attn_mask(tgt, src)
     assert mask.tolist() == [[[True, False, False], [True, False, False]]]
 
 
-def test_build_transformer_output_shape(transformer, config):
+def test_build_transformer_output_shape(transformer):
     src = torch.randint(5, 50, (2, 7))
     tgt = torch.randint(5, 50, (2, 4))
     out = transformer(
         src, tgt, torch.ones(2, 7, dtype=torch.bool), torch.ones(2, 4, dtype=torch.bool)
     )
-    assert out.shape == (2, 4, config["tokenizer"]["vocab_size"])
+    assert out.shape == (2, 4, CONFIG["tokenizer"]["vocab_size"])
 
 
 def test_decoder_is_causal(transformer):
