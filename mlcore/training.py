@@ -1,17 +1,20 @@
+import itertools
 import json
 import logging
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterable
 from typing import Any, NotRequired, TypedDict
 
 import torch
-from torch import amp, nn
+from torch import Tensor, amp, nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from mlcore import runs
+from mlcore.data.samplers import resume_at_minibatch
 
 
 class Run(TypedDict):
@@ -31,6 +34,12 @@ class Run(TypedDict):
 TrainLoop = Callable[
     [str, nn.Module, dict[str, DataLoader], PreTrainedTokenizerFast, Run, runs.Config], None
 ]
+
+# A minibatch's loss to backpropagate, and the named values to log for it
+ComputeLoss = Callable[[nn.Module, dict[str, Any]], tuple[Tensor, dict[str, Tensor]]]
+
+# Extra validation results from one minibatch, such as BLEU from generated text
+ValidationMetrics = Callable[[nn.Module, dict[str, Any]], dict[str, float]]
 
 
 class WarmupInverseSquareRootLR(LRScheduler):
@@ -302,6 +311,194 @@ def get_run(
 
     run["run_path"] = run_path
     return run
+
+
+def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
+    return {
+        k: v.to(device, non_blocking=True) if isinstance(v, Tensor) else v for k, v in batch.items()
+    }
+
+
+def validation_step(
+    model: nn.Module,
+    dataloader: Iterable[dict[str, Any]],
+    compute_loss: ComputeLoss,
+    tokens_key: str,
+    pad_token_id: int,
+    device: torch.device,
+    step_no: int,
+    validation_minibatches: int,
+    validation_metrics: ValidationMetrics | None = None,
+) -> dict[str, Any]:
+    """Average the logged values over the first minibatches of the test split.
+
+    `validation_metrics`, when given, runs on the first minibatch only.
+    """
+
+    model.eval()
+    start_time = time.time()
+
+    totals: dict[str, float] = {}
+    total_tokens = 0
+    num_batches = 0
+    first_batch = None
+
+    for minibatch in itertools.islice(dataloader, validation_minibatches):
+        minibatch = _to_device(minibatch, device)
+
+        with torch.no_grad():
+            _, logged = compute_loss(model, minibatch)
+
+        for name, value in logged.items():
+            totals[name] = totals.get(name, 0.0) + value.item()
+        total_tokens += minibatch[tokens_key].ne(pad_token_id).sum().item()
+        num_batches += 1
+        if first_batch is None:
+            first_batch = minibatch
+
+    if first_batch is None:
+        raise ValueError("Validation dataloader yielded no batches")
+
+    elapsed_time = time.time() - start_time
+
+    result: dict[str, Any] = {
+        "type": "validation",
+        "step_no": step_no,
+        "num_tokens": total_tokens,
+        "tokens_per_sec": total_tokens / elapsed_time,
+        **{name: total / num_batches for name, total in totals.items()},
+    }
+    if validation_metrics is not None:
+        result["validation_metrics"] = validation_metrics(model, first_batch)
+    return result
+
+
+def supervised_loop(
+    stage: str,
+    model: nn.Module,
+    dataloaders: dict[str, DataLoader],
+    tokenizer: PreTrainedTokenizerFast,
+    run: Run,
+    config: runs.Config,
+    *,
+    compute_loss: ComputeLoss,
+    tokens_key: str,
+    validation_metrics: ValidationMetrics | None = None,
+) -> None:
+    """Step through the train split with gradient accumulation, validating and checkpointing.
+
+    The project supplies the forward pass and loss as `compute_loss`. `tokens_key` names the
+    batch field whose non-pad tokens are counted for throughput.
+    """
+
+    train_config = config["train"][stage]
+    device = torch.device(train_config["device"])
+    grad_accum_steps = (
+        train_config["effective_batch_token_size"] // train_config["minibatch_token_size"]
+    )
+    num_steps = train_config["num_steps"]
+    checkpoint_steps = train_config["checkpoint_steps"]
+    keep_checkpoints = train_config.get("keep_checkpoints")
+    validation_steps = train_config["validation_steps"]
+    validation_batches = train_config["validation_batches"]
+    cache_clear_steps = train_config.get("cache_clear_steps")
+
+    optimiser = run["optimiser"]
+    lr_scheduler = run["lr_scheduler"]
+    scaler = run["scaler"]
+    results = run["results"]
+    step_no = run["step_no"]
+    run_path = run["run_path"]
+
+    batch_tokens = 0
+    start_time = time.time()
+    totals: dict[str, float] = {}
+    # Resume where we left off by skipping the sampler forward, counted in minibatches
+    resume_at_minibatch(dataloaders["train"], step_no * grad_accum_steps)
+    optimiser.zero_grad(set_to_none=True)
+
+    model.train()
+    for accum_idx, batch in enumerate(dataloaders["train"]):
+        batch = _to_device(batch, device)
+
+        with amp.autocast(device_type=device.type):
+            loss, logged = compute_loss(model, batch)
+
+        batch_tokens += batch[tokens_key].ne(tokenizer.pad_token_id).sum().item()
+
+        scaled_loss = loss / grad_accum_steps
+        scaler.scale(scaled_loss).backward()
+        for name, value in logged.items():
+            totals[name] = totals.get(name, 0.0) + value.item() / grad_accum_steps
+
+        # Gradient accumulation
+        if (accum_idx + 1) % grad_accum_steps != 0:
+            continue
+
+        # Step optimiser and scheduler
+        scaler.unscale_(optimiser)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        scaler.step(optimiser)
+        scaler.update()
+        lr_scheduler.step()
+        optimiser.zero_grad(set_to_none=True)
+
+        step_no += 1
+
+        elapsed_time = time.time() - start_time
+        result: dict[str, Any] = {
+            "type": "train",
+            "step_no": step_no,
+            "num_tokens": batch_tokens,
+            "tokens_per_sec": batch_tokens / elapsed_time,
+            "learning_rate": lr_scheduler.get_last_lr()[0],
+            **totals,
+            "token_length": batch[tokens_key].shape[1],
+            "grad_norm": grad_norm.item(),
+        }
+        results.append(result)
+        logging.info(result)
+
+        if step_no % validation_steps == 0:
+            validation_result = validation_step(
+                model,
+                dataloaders["test"],
+                compute_loss,
+                tokens_key,
+                tokenizer.pad_token_id,
+                device,
+                step_no,
+                validation_batches * grad_accum_steps,
+                validation_metrics,
+            )
+            logging.info(validation_result)
+            results.append(validation_result)
+            model.train()
+
+        if step_no % checkpoint_steps == 0:
+            save_checkpoint(
+                model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
+            )
+
+        # Delete tensors to free up memory
+        del batch, loss, logged, scaled_loss
+        if cache_clear_steps and step_no % cache_clear_steps == 0:
+            torch.cuda.empty_cache()
+
+        batch_tokens = 0
+        start_time = time.time()
+        totals = {}
+
+        if step_no >= num_steps:
+            break
+
+    # Final save when num_steps isn't a multiple of checkpoint_steps, so the tail isn't lost.
+    if step_no % checkpoint_steps != 0:
+        save_checkpoint(
+            model, optimiser, lr_scheduler, scaler, run_path, step_no, results, keep_checkpoints
+        )
+
+    return None
 
 
 def train(

@@ -21,13 +21,6 @@ def test_generate_metrics_perfect_and_wrong(monkeypatch, tok):
     assert train.generate_metrics(None, batch, 32, tok, "cpu")["bleu"] == pytest.approx(0.0)
 
 
-def test_validation_step_rejects_empty_dataloader(transformer, tok):
-    with pytest.raises(ValueError, match="no batches"):
-        train.validation_step(
-            transformer, [], torch.nn.CrossEntropyLoss(), torch.device("cpu"), tok, 0, 32, 1
-        )
-
-
 def run_training(config, transformer, ds_tokenized, tok):
     runs.init_run(config, STAGE)
     loaders = dataloader.create_dataloaders(ds_tokenized, config, STAGE)
