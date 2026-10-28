@@ -18,7 +18,8 @@ def save_tokenizer(tokenizer: PreTrainedTokenizerFast, dir: str) -> None:
 def load_tokenizer(dir: str) -> PreTrainedTokenizerFast:
     if not os.path.isdir(f"{dir}/tokenizer"):
         raise FileNotFoundError(
-            f"No tokenizer in {dir} — run `python -m scripts.tokenizer` for this config first."
+            f"No tokenizer in {dir} — train one for this config first "
+            "(the project's tokenizer step, or get_tokenizer)."
         )
     return PreTrainedTokenizerFast.from_pretrained(f"{dir}/tokenizer")
 
