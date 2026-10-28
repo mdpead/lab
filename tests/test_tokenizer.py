@@ -18,7 +18,7 @@ def _run_config(tmp_path, vocab_size=100):
 
 
 def test_loading_a_tokenizer_that_was_never_trained_says_how_to_train_it(tmp_path):
-    with pytest.raises(FileNotFoundError, match="scripts.tokenizer"):
+    with pytest.raises(FileNotFoundError, match="train one for this config"):
         tokenizer_utils.load_tokenizer(str(tmp_path))
 
 
