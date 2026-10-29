@@ -1,0 +1,52 @@
+[
+ {
+  "type": "train",
+  "step_no": 1,
+  "num_tokens": 28,
+  "learning_rate": 0.001,
+  "loss": 5.35477352142334,
+  "token_length": 8,
+  "grad_norm": 1.7700685262680054
+ },
+ {
+  "type": "train",
+  "step_no": 2,
+  "num_tokens": 29,
+  "learning_rate": 0.0008164965809277262,
+  "loss": 5.143883228302002,
+  "token_length": 4,
+  "grad_norm": 2.5466389656066895
+ },
+ {
+  "type": "validation",
+  "step_no": 2,
+  "num_tokens": 20,
+  "loss": 5.190075397491455,
+  "validation_metrics.bleu": 0.0
+ },
+ {
+  "type": "train",
+  "step_no": 3,
+  "num_tokens": 27,
+  "learning_rate": 0.0007071067811865476,
+  "loss": 5.209056377410889,
+  "token_length": 8,
+  "grad_norm": 1.839625358581543
+ },
+ {
+  "type": "train",
+  "step_no": 4,
+  "num_tokens": 26,
+  "learning_rate": 0.0006324555320336759,
+  "loss": 5.106670618057251,
+  "token_length": 6,
+  "grad_norm": 1.6455931663513184
+ },
+ {
+  "type": "validation",
+  "step_no": 4,
+  "num_tokens": 20,
+  "loss": 5.096757650375366,
+  "validation_metrics.bleu": 0.0
+ }
+]

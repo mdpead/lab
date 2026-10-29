@@ -45,12 +45,9 @@ def _run_loop(cfg, make_model, tokenizer):
         for i in range(24)
     ]
     model = make_model(len(tokenizer)).float()
-    tc = cfg["stages"]["sft"]["train"]
     loaders = dl.create_dataloaders_sft({"train": rows, "test": rows[:6]}, tokenizer, cfg)
-    run = training.create_run(model, tc, tokenizer)
-    run["run_path"] = runs.get_stage_path(cfg, "sft")
-    train.train_loop("sft", model, loaders, tokenizer, run, cfg)
-    return run["run_path"]
+    train.train("sft", model, loaders, tokenizer, cfg)
+    return runs.get_stage_path(cfg, "sft")
 
 
 def test_final_step_is_checkpointed_when_it_is_not_a_multiple(tmp_path, make_model, tokenizer):

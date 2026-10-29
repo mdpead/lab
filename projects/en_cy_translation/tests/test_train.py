@@ -1,11 +1,14 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
 import torch
 from lab import runs, training
+from lab.models import build_model
+from lab.tokenizer import train_tokenizer
 
-from src import dataloader, train
+from src import dataloader, tokenizer, train
 from src.config import Config
 from src.train import STAGE
 
@@ -96,8 +99,42 @@ def test_train_skips_when_already_complete(config, transformer, ds_tokenized, to
     stage_path = run_training(config, transformer, ds_tokenized, tok)
 
     def fail(*args, **kwargs):
-        raise AssertionError("train_loop should not run")
+        raise AssertionError("the training loop should not run")
 
-    monkeypatch.setattr(train, "train_loop", fail)
+    monkeypatch.setattr(training, "supervised_loop", fail)
     run_training(config, transformer, ds_tokenized, tok)
     assert [r["step_no"] for r in read_results(stage_path) if r["type"] == "train"] == [1, 2, 3, 4]
+
+
+# --- results recorded from the training code before training.train ran the loop itself ---
+
+REFERENCE = json.loads((Path(__file__).parent / "fixtures/training_results.json").read_text())
+
+
+def _flat(entry, prefix=""):
+    """A results entry without its timings, nested values flattened, for pytest.approx."""
+    flat = {}
+    for key, value in entry.items():
+        if isinstance(value, dict):
+            flat.update(_flat(value, f"{prefix}{key}."))
+        elif key != "tokens_per_sec":
+            flat[prefix + key] = value
+    return flat
+
+
+def test_training_matches_the_recorded_results(config, raw_ds):
+    """A short run, BLEU included. The tokenizer is BPE, whose training is deterministic, so
+    the results repeat from one process to the next; WordPiece breaks ties randomly."""
+    texts = list(raw_ds["train"]["text_en"]) + list(raw_ds["train"]["text_cy"])
+    tok = train_tokenizer({"type": "bpe", "vocab_size": 300}, iter(texts))
+    ds = tokenizer.tokenize_dataset(raw_ds, tok, config)
+    config["tokenizer"]["vocab_size"] = len(tok)
+    torch.manual_seed(0)
+    model = build_model(config)
+
+    stage_path = run_training(config, model, ds, tok)
+
+    results = [_flat(entry) for entry in read_results(stage_path)]
+    assert len(results) == len(REFERENCE)
+    for entry, expected in zip(results, REFERENCE, strict=True):
+        assert entry == pytest.approx(expected, rel=1e-5)

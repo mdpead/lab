@@ -55,36 +55,25 @@ def compute_loss(
     return loss, {"loss": loss}
 
 
-def train_loop(
-    stage: str,
-    model: nn.Module,
-    dataloaders: dict[str, DataLoader],
-    tokenizer: PreTrainedTokenizerFast,
-    run: training.Run,
-    config: runs.Config,
-) -> None:
-    device = torch.device(config["stages"][stage]["train"]["device"])
-    max_length = config["model"]["max_length"]
-    training.supervised_loop(
-        stage,
-        model,
-        dataloaders,
-        tokenizer,
-        run,
-        config,
-        compute_loss=partial(compute_loss, criterion=run["criterion"]),
-        tokens_key="src_input_ids",
-        validation_metrics=lambda m, batch: generate_metrics(
-            m, batch, max_length, tokenizer, device
-        ),
-    )
-
-
 def train(
     model: nn.Module,
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,
 ) -> None:
-    """Train the translation stage: training.train's bookkeeping, this module's loop."""
-    return training.train(STAGE, model, dataloaders, tokenizer, config, loop=train_loop)
+    """Train the translation stage: lab's supervised loop with this module's loss and BLEU."""
+    training.train(
+        STAGE,
+        model,
+        dataloaders,
+        tokenizer,
+        config,
+        compute_loss=compute_loss,
+        tokens_key="src_input_ids",
+        validation_metrics=partial(
+            generate_metrics,
+            max_length=config["model"]["max_length"],
+            tokenizer=tokenizer,
+            device=torch.device(config["stages"][STAGE]["train"]["device"]),
+        ),
+    )

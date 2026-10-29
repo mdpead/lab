@@ -1,7 +1,7 @@
 """The shared supervised loop, driven by a toy model on CPU."""
 
 import json
-from functools import partial
+from pathlib import Path
 
 import pytest
 import torch
@@ -74,7 +74,7 @@ def _train(tmp_path, tokenizer, num_steps=3, validation_metrics=None):
         tokenizer,
         run,
         config,
-        compute_loss=partial(_compute_loss, criterion=run["criterion"]),
+        compute_loss=_compute_loss,
         tokens_key="input_ids",
         validation_metrics=validation_metrics,
     )
@@ -120,3 +120,19 @@ def test_final_step_is_checkpointed(tmp_path, tokenizer):
 def test_validation_step_rejects_empty_dataloader():
     with pytest.raises(ValueError, match="no batches"):
         training.validation_step(nn.Linear(2, 2), [], None, "input_ids", PAD, "cpu", 0, 1)
+
+
+# --- results recorded from the loop before training.train ran it itself ---
+
+REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures/supervised_loop_results.json").read_text()
+)
+
+
+def test_loop_matches_the_recorded_results(tmp_path, tokenizer):
+    run_path = _train(tmp_path, tokenizer, num_steps=5)
+    results = json.load(open(f"{run_path}/results.json"))
+    timeless = [{k: v for k, v in r.items() if k != "tokens_per_sec"} for r in results]
+    assert len(timeless) == len(REFERENCE)
+    for entry, expected in zip(timeless, REFERENCE, strict=True):
+        assert entry == pytest.approx(expected, rel=1e-5)

@@ -52,17 +52,18 @@ subclassing the training code:
 
 | Hook | What the project supplies | Used by |
 |---|---|---|
-| `compute_loss` | `(model, batch) -> (loss, values_to_log)` | `training.supervised_loop` |
-| `tokens_key` | the batch field whose non-pad tokens count towards throughput | `training.supervised_loop` |
-| `validation_metrics` | `(model, batch) -> dict[str, float]`, optional | `training.supervised_loop` |
-| `loop` | `(stage, model, dataloaders, tokenizer, run, config) -> None` | `training.train` |
+| `compute_loss` | `(model, batch, criterion) -> (loss, values_to_log)` | `training.train`, for its supervised loop |
+| `tokens_key` | the batch field whose non-pad tokens count towards throughput | `training.train`, for its supervised loop |
+| `validation_metrics` | `(model, batch) -> dict[str, float]`, optional | `training.train`, for its supervised loop |
+| `loop` | `(stage, model, dataloaders, tokenizer, run, config) -> None`, only for a stage that is not supervised training | `training.train`, in place of its supervised loop |
 | `corpus` | `(datasets) -> Iterable[str]`, the text the tokenizer trains on | `tokenizer.get_tokenizer` |
 | A component | an `nn.Module` registered with `@NORMS.register("name")` (or `FEEDFORWARDS`, `ATTENTIONS`, `POSITIONS`); its constructor is its config | `model.*` blocks with that `type` |
 | A tokenizer | a class registered with `@TOKENIZERS.register("name")` whose `train(texts)` returns a `PreTrainedTokenizerFast`; its constructor is its config | the `tokenizer` section with that `type` |
 | A schema | frozen dataclasses subclassing `RunConfig`, `StageConfig` and `TrainStage` or `SupervisedStage` | `runs.parse_config`, `runs.init_run` |
 
-The translation project's whole training module is a loss, a BLEU callback and two calls into
-`lab`:
+`training.train` owns the loop. It resumes the stage, or starts it from `init_from`, then runs
+the supervised loop, which calls the project's loss. The translation project's whole training
+module is a loss, a BLEU callback and one call into `lab`:
 
 ```python
 def compute_loss(model, batch, criterion):
@@ -76,27 +77,23 @@ def compute_loss(model, batch, criterion):
     return loss, {"loss": loss}
 
 
-def train_loop(stage, model, dataloaders, tokenizer, run, config):
-    training.supervised_loop(
-        stage,
+def train(model, dataloaders, tokenizer, config):
+    training.train(
+        STAGE,
         model,
         dataloaders,
         tokenizer,
-        run,
         config,
-        compute_loss=partial(compute_loss, criterion=run["criterion"]),
+        compute_loss=compute_loss,
         tokens_key="src_input_ids",
-        validation_metrics=lambda m, batch: generate_metrics(m, batch, ...),  # BLEU
+        validation_metrics=partial(generate_metrics, ...),  # BLEU
     )
-
-
-def train(model, dataloaders, tokenizer, config):
-    return training.train(STAGE, model, dataloaders, tokenizer, config, loop=train_loop)
 ```
 
 The reasoning project's loss adds the mixture-of-experts load-balancing term and logs both
-parts; everything else is the same. Its RL stage passes its own `loop` to `training.train`
-instead of using `supervised_loop`.
+parts; everything else is the same. Its RL stage does not fit the supervised loop, so its script
+passes its own: `training.train("rl", ..., loop=rl.train_loop)`. It still gets the resume,
+seeding and already-complete handling.
 
 A component is a layer and a decorator. Its config block is checked against its constructor,
 leaving out the arguments the model passes in (`d_model` here):
@@ -204,6 +201,7 @@ models/<name>/
 | Build models from named components, stage-first configs ([#11](https://github.com/mdpead/lab/pull/11)) | Against fixtures recorded from the old code: identical seeded weights for both families, identical parameter names, shapes and counts for every config, and bitwise-identical encoder-decoder outputs. Each rewritten config holds the same values. A one-off script migrates saved runs; on run folders recreated in the old layout, every stage resumed with its checkpoint. |
 | Share the tokenizers ([#14](https://github.com/mdpead/lab/pull/14)) | Against fixtures recorded from each project's tokenizer code: an identical serialized BPE tokenizer, with and without digit splitting. WordPiece training breaks ties randomly, so its learned vocabulary differs between runs of the old code too; its normalizer, pre-tokenizer, decoder, post-processor and special-token ids are identical. The migration script brings saved configs to the new section, so trained tokenizers are kept. |
 | Share the data loaders and their worker settings ([#15](https://github.com/mdpead/lab/pull/15)) | Against hashes of the first 30 batches each old loader yielded on fixed rows: translation, pretraining and SFT, train and test splits, all identical. |
+| Let `training.train` run the supervised loop itself ([#16](https://github.com/mdpead/lab/pull/16)) | Against `results.json` recorded from the old code, timings aside: a short translation run, BLEU included, and the toy-model loop in `tests/`, identical to 1e-5. Reasoning's pretrain and SFT path is the same call with its own loss, and needs a GPU to run. |
 
 ## Testing
 
@@ -212,8 +210,8 @@ a Triton kernel are marked `cuda` and skip without a GPU; CI runs the rest on ev
 `lab.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
 conftest with `pytest_plugins = ["lab.testing"]`. `tests/fixtures/` and each project's
 `tests/fixtures/` hold what the code produced before each refactor, which the tests compare
-against: model layouts and weight hashes from before #11, tokenizers from before #14, and
-hashes of the batches each project's loaders yielded before #15.
+against: model layouts and weight hashes from before #11, tokenizers from before #14, hashes
+of the batches each project's loaders yielded before #15, and training results from before #16.
 
 ## Limitations and next steps
 
