@@ -9,18 +9,18 @@ import logging
 from typing import Any
 
 import torch
-import yaml
 from mlcore import generation, runs, tokenizer, training
-from mlcore.models import decoder_only
+from mlcore.models import build_model
 
 from src import data, rl
+from src.config import Config
 
 
 # Greedy pass@1 on a test set larger than RL validation's ~400 prompts.
 # Functions come from a seed no stage trains on; only those on every stage's test side are kept.
 def eval_rows(config: runs.Config, num_records: int, seed: int) -> list[dict[str, Any]]:
-    ds_config = {**config["data"]["rl"], "num_records": num_records}
-    ratio = min(config["data"]["sft"]["test_split_ratio"], ds_config["test_split_ratio"])
+    ds_config = {**config["stages"]["rl"]["data"], "num_records": num_records}
+    ratio = min(config["stages"]["sft"]["data"]["test_split_ratio"], ds_config["test_split_ratio"])
     rows: list[dict[str, Any]] = []
     for record in data._synth_records(ds_config, seed, with_trace=False):
         if not data._is_test(record["source"], ratio):
@@ -51,22 +51,21 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=256)
     args = parser.parse_args()
 
-    with open(f"configs/{args.config}.yaml") as f:
-        config = yaml.safe_load(f)
+    config = runs.load_config_file(f"configs/{args.config}.yaml", Config)
 
     # sft draws from seed, rl from seed + 1
     rows = eval_rows(config, args.num_records, config["seed"] + 2)
     num_functions = len({row["source"] for row in rows})
     logging.info(f"eval: {len(rows)} prompts over {num_functions} functions")
 
-    device = torch.device(config["train"][args.stage]["device"])
-    transformer = decoder_only.build_transformer(config)
+    device = torch.device(config["stages"][args.stage]["train"]["device"])
+    transformer = build_model(config)
     training.load_model_weights(
         transformer, runs.get_stage_path(config, args.stage), device, step=args.step
     )
     tok = tokenizer.load_tokenizer(runs.get_run_path(config))
 
-    max_new_tokens = config["train"]["rl"]["max_new_tokens"]
+    max_new_tokens = config["stages"]["rl"]["train"]["max_new_tokens"]
     passed: list[bool] = []
     for start in range(0, len(rows), args.batch_size):
         batch = rows[start : start + args.batch_size]

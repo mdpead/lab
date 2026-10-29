@@ -1,6 +1,10 @@
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+
+from mlcore.config import Registry
 
 
 class PositionWiseFeedForward(nn.Module):
@@ -120,3 +124,56 @@ class MixtureOfExpertsFeedForward(nn.Module):
         loss_aux = self.num_experts * (expert_fracs * expert_probs).sum()
 
         return out.reshape(x.shape), loss_aux
+
+
+FEEDFORWARDS = Registry("feedforward")
+
+
+@dataclass(frozen=True, kw_only=True)
+class FeedForwardConfig:
+    """A feed-forward block applied to each position."""
+
+    d_ff: int
+
+    def build(self, d_model: int) -> nn.Module:
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, kw_only=True)
+class DenseFeedForwardConfig(FeedForwardConfig):
+    """A feed-forward block that returns just its output, with no auxiliary loss."""
+
+
+@FEEDFORWARDS.register("relu")
+@dataclass(frozen=True, kw_only=True)
+class ReLUFeedForwardConfig(DenseFeedForwardConfig):
+    bias: bool = False
+
+    def build(self, d_model: int) -> nn.Module:
+        return PositionWiseFeedForward(d_model, self.d_ff, bias=self.bias)
+
+
+@FEEDFORWARDS.register("swiglu")
+@dataclass(frozen=True, kw_only=True)
+class SwiGLUFeedForwardConfig(DenseFeedForwardConfig):
+    def build(self, d_model: int) -> nn.Module:
+        return SwiGLUFeedForward(d_model, self.d_ff)
+
+
+@FEEDFORWARDS.register("moe")
+@dataclass(frozen=True, kw_only=True)
+class MixtureOfExpertsConfig(FeedForwardConfig):
+    """SwiGLU experts with top-k routing. Returns its output and a load-balancing loss."""
+
+    num_experts: int
+    top_k: int
+    capacity_factor: float
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.top_k <= self.num_experts:
+            raise ValueError(f"top_k ({self.top_k}) must be between 1 and num_experts")
+
+    def build(self, d_model: int) -> nn.Module:
+        return MixtureOfExpertsFeedForward(
+            d_model, self.d_ff, self.num_experts, self.top_k, self.capacity_factor
+        )

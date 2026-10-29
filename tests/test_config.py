@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from mlcore.config import ConfigError, field_type, parse, resumable, resumable_keys, stage_class
-from mlcore.training import SupervisedStage, TrainStage
+from mlcore.training import StageConfig, SupervisedStage, TrainStage
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -86,13 +86,18 @@ def test_resumable_keys_and_field_types():
 
 
 @dataclass(frozen=True, kw_only=True)
+class _SFT(StageConfig):
+    train: SupervisedStage
+
+
+@dataclass(frozen=True, kw_only=True)
 class _Stages:
-    sft: SupervisedStage | None = None
+    sft: _SFT | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class _Schema:
-    train: _Stages
+    stages: _Stages
 
 
 def test_stage_class_finds_the_stage_schema():

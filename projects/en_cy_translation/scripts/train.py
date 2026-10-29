@@ -1,7 +1,7 @@
 import logging
 
 from mlcore import runs
-from mlcore.models import encoder_decoder
+from mlcore.models import build_model
 
 from src import dataloader, datasets, tokenizer, train
 from src.config import Config
@@ -23,7 +23,7 @@ def main() -> None:
 
     dataloaders = dataloader.create_dataloaders(ds_tokenized, config, train.STAGE)
 
-    transformer = encoder_decoder.build_transformer(config)
+    transformer = build_model(config)
 
     train.train(transformer, dataloaders, token, config)
 

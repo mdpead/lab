@@ -4,13 +4,14 @@ import sys
 import unicodedata
 from collections import defaultdict
 
-import yaml
-
 from datasets import load_dataset
 
 sys.path.insert(0, ".")
 
+from mlcore import runs
+
 from src import datasets as ds_module
+from src.config import Config
 from src.train import STAGE
 
 N = 8  # n-gram length for partial-overlap detection
@@ -33,8 +34,7 @@ def ngrams(tokens: list[str]) -> set[str]:
     return {" ".join(tokens[i : i + N]) for i in range(len(tokens) - N + 1)}
 
 
-with open(f"configs/{args.config}.yaml") as f:
-    config = yaml.safe_load(f)
+config = runs.load_config_file(f"configs/{args.config}.yaml", Config)
 
 train = ds_module.get_dataset(STAGE, config)["train"]
 print(f"Training split: {len(train)} pairs")

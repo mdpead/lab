@@ -1,8 +1,10 @@
 import math
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
 
+from mlcore.config import Registry
 from mlcore.kernels import flash_attention
 from mlcore.layers.position import RotaryPositionalEncoding
 
@@ -117,3 +119,39 @@ class MultiHeadAttention(nn.Module):
         O = self.W_o(A)
 
         return O
+
+
+ATTENTIONS = Registry("attention")
+
+
+@ATTENTIONS.register("gqa")
+@dataclass(frozen=True, kw_only=True)
+class GroupedQueryAttentionConfig:
+    """Grouped-query attention through the Triton flash kernel, with rotary positions."""
+
+    num_heads: int
+    num_kv_heads: int
+    d_h: int
+
+    def __post_init__(self) -> None:
+        if self.num_heads % self.num_kv_heads:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be a multiple of num_kv_heads "
+                f"({self.num_kv_heads})"
+            )
+
+    def build(self, d_model: int, rope_layer: RotaryPositionalEncoding) -> nn.Module:
+        return GroupedQueryAttention(
+            d_model, self.num_heads, self.num_kv_heads, self.d_h, rope_layer
+        )
+
+
+@ATTENTIONS.register("mha")
+@dataclass(frozen=True, kw_only=True)
+class MultiHeadAttentionConfig:
+    """Plain multi-head attention with an explicit mask, for self- and cross-attention."""
+
+    num_heads: int
+
+    def build(self, d_model: int, dropout: float) -> nn.Module:
+        return MultiHeadAttention(d_model, self.num_heads, dropout)

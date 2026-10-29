@@ -44,15 +44,15 @@ def test_train_end_to_end(config, transformer, ds_tokenized, tok):
     assert [r["step_no"] for r in validation_results] == [2, 4]
     assert all(r["loss"] > 0 and r["num_tokens"] > 0 for r in train_results)
     assert all("bleu" in r["validation_metrics"] for r in validation_results)
-    learning_rate = config["train"][STAGE]["learning_rate"]
+    learning_rate = config["stages"][STAGE]["train"]["learning_rate"]
     assert train_results[0]["learning_rate"] == pytest.approx(learning_rate)
 
 
 def test_train_resumes_from_checkpoint(config, transformer, ds_tokenized, tok):
     stage_path = run_training(config, transformer, ds_tokenized, tok)
 
-    config["train"][STAGE]["num_steps"] = 6
-    run = training.get_run(stage_path, transformer, config["train"][STAGE], tok)
+    config["stages"][STAGE]["train"]["num_steps"] = 6
+    run = training.get_run(stage_path, transformer, config["stages"][STAGE]["train"], tok)
     assert run["step_no"] == 4
     assert len(run["results"]) == 6
 
@@ -65,9 +65,10 @@ def test_train_resumes_from_checkpoint(config, transformer, ds_tokenized, tok):
 def test_resume_continues_the_same_batch_order(config, ds_tokenized, tok, transformer):
     """Stopping and resuming sees the same minibatches as one uninterrupted run."""
     straight = dict(config, name="straight")
-    straight["train"] = {STAGE: dict(config["train"][STAGE], num_steps=4)}
+    stage = config["stages"][STAGE]
+    straight["stages"] = {STAGE: dict(stage, train=dict(stage["train"], num_steps=4))}
     resumed = dict(config, name="resumed")
-    resumed["train"] = {STAGE: dict(config["train"][STAGE], num_steps=2)}
+    resumed["stages"] = {STAGE: dict(stage, train=dict(stage["train"], num_steps=2))}
 
     def tokens_per_step(cfg):
         return [
@@ -79,14 +80,14 @@ def test_resume_continues_the_same_batch_order(config, ds_tokenized, tok, transf
     torch.manual_seed(0)
     run_training(straight, transformer, ds_tokenized, tok)
     run_training(resumed, transformer, ds_tokenized, tok)
-    resumed["train"][STAGE]["num_steps"] = 4
+    resumed["stages"][STAGE]["train"]["num_steps"] = 4
     run_training(resumed, transformer, ds_tokenized, tok)
 
     assert tokens_per_step(resumed) == tokens_per_step(straight)
 
 
 def test_final_step_is_checkpointed(config, transformer, ds_tokenized, tok):
-    config["train"][STAGE]["num_steps"] = 3
+    config["stages"][STAGE]["train"]["num_steps"] = 3
     stage_path = run_training(config, transformer, ds_tokenized, tok)
     assert sorted(os.listdir(f"{stage_path}/checkpoints")) == ["2.pt", "3.pt"]
 

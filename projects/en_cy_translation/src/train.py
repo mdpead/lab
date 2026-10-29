@@ -63,7 +63,7 @@ def train_loop(
     run: training.Run,
     config: runs.Config,
 ) -> None:
-    device = torch.device(config["train"][stage]["device"])
+    device = torch.device(config["stages"][stage]["train"]["device"])
     max_length = config["model"]["max_length"]
     training.supervised_loop(
         stage,

@@ -37,7 +37,7 @@ def train_loop(
         compute_loss=partial(
             compute_loss,
             criterion=run["criterion"],
-            router_aux_loss_coef=config["train"][stage]["router_aux_loss_coef"],
+            router_aux_loss_coef=config["stages"][stage]["train"]["router_aux_loss_coef"],
         ),
         tokens_key="input_ids",
     )
@@ -49,7 +49,6 @@ def train(
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,
-    init_from: str | None = None,
 ) -> None:
     """Run a pretrain or SFT stage: training.train's bookkeeping, this module's loop."""
-    return training.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)
+    return training.train(stage, model, dataloaders, tokenizer, config, loop=train_loop)

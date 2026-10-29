@@ -3,7 +3,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 from mlcore import runs, training
-from mlcore.models.encoder_decoder import Transformer
+from mlcore.models import encoder_decoder, parse_model, upgrade_legacy_model
+from mlcore.models.encoder_decoder import ModelConfig, Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 
@@ -46,6 +47,35 @@ class EnCyConfig(PretrainedConfig):
         self.dropout = dropout
 
 
+# EnCyConfig's flat fields, which are what the Hub stores
+_FLAT_FIELDS = ("d_model", "num_heads", "d_ff", "num_enc_layers", "num_dec_layers", "max_length")
+
+
+def _model_config(flat: dict[str, Any]) -> ModelConfig:
+    """The architecture the Hub format describes: the original one, with these sizes."""
+    return parse_model(encoder_decoder.upgrade_legacy(flat), ModelConfig)
+
+
+def _flat_fields(model_config: ModelConfig) -> dict[str, Any]:
+    """EnCyConfig's fields for a model config, which must be the architecture they imply."""
+    flat = {
+        "d_model": model_config.d_model,
+        "num_heads": model_config.attention.num_heads,
+        "d_ff": model_config.feedforward.d_ff,
+        "num_enc_layers": model_config.num_enc_layers,
+        "num_dec_layers": model_config.num_dec_layers,
+        "max_length": model_config.max_length,
+        "dropout": model_config.dropout,
+    }
+    if _model_config(flat) != model_config:
+        raise ValueError(
+            "EnCyForTranslation describes only the original architecture (LayerNorm, "
+            "sinusoidal positions, multi-head attention, ReLU feed-forward with biases); "
+            f"this run's model is {model_config}"
+        )
+    return flat
+
+
 class _EncoderWrapper(torch.nn.Module):
     """Wrapper around transformer.encode() returning BaseModelOutput."""
 
@@ -72,16 +102,8 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
 
     def __init__(self, config: EnCyConfig) -> None:
         super().__init__(config)
-        self.transformer = Transformer(
-            d_model=config.d_model,
-            num_heads=config.num_heads,
-            d_ff=config.d_ff,
-            num_enc_layers=config.num_enc_layers,
-            num_dec_layers=config.num_dec_layers,
-            vocab_size=config.vocab_size,
-            max_length=config.max_length,
-            dropout=config.dropout,
-        )
+        flat = {name: getattr(config, name) for name in (*_FLAT_FIELDS, "dropout")}
+        self.transformer = Transformer(_model_config(flat), config.vocab_size)
         self.post_init()
 
     def get_encoder(self) -> _EncoderWrapper:
@@ -159,16 +181,10 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
     def from_run(cls, stage_path: str) -> "EnCyForTranslation":
         """Load the latest checkpoint of a training stage, e.g. models/base/translation."""
         config_dict = runs.load_config(stage_path)
-        model_cfg = config_dict["model"]
+        # Runs saved before named components have a flat model section; upgrade either form
+        model_config = parse_model(upgrade_legacy_model(config_dict["model"]), ModelConfig)
         hf_config = EnCyConfig(
-            vocab_size=config_dict["tokenizer"]["vocab_size"],
-            d_model=model_cfg["d_model"],
-            num_heads=model_cfg["num_heads"],
-            d_ff=model_cfg["d_ff"],
-            num_enc_layers=model_cfg["num_enc_layers"],
-            num_dec_layers=model_cfg["num_dec_layers"],
-            max_length=model_cfg["max_length"],
-            dropout=model_cfg["dropout"],
+            vocab_size=config_dict["tokenizer"]["vocab_size"], **_flat_fields(model_config)
         )
         model = cls(hf_config)
         steps = training.checkpoint_steps_on_disk(f"{stage_path}/checkpoints")

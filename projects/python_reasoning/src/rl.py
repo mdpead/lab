@@ -47,7 +47,7 @@ def reward(
 ) -> list[float]:
     """The reward each rollout is trained on: its task's graded reward, else its score.
 
-    `options` are keyword arguments for the graded rewards, from train.rl.reward_options.
+    `options` are keyword arguments for the graded rewards, from stages.rl.train.reward_options.
     """
     return [
         float(
@@ -258,7 +258,7 @@ def train_loop(
     config: Config,
 ) -> None:
 
-    train_config = config["train"][stage]
+    train_config = config["stages"][stage]["train"]
     device = torch.device(train_config["device"])
     # A step is defined in prompts; generation_prompts_size only batches their generation
     if train_config["effective_prompts_size"] % train_config["generation_prompts_size"] != 0:
@@ -493,7 +493,6 @@ def train_rl(
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
     config: Config,
-    init_from: str | None = None,
 ) -> None:
     """Run the RL stage: training.train's bookkeeping, this module's loop."""
-    return training.train(stage, model, dataloaders, tokenizer, config, init_from, loop=train_loop)
+    return training.train(stage, model, dataloaders, tokenizer, config, loop=train_loop)

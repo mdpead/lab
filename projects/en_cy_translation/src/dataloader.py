@@ -45,7 +45,7 @@ def create_dataloaders(
     ds_tokenized: DatasetDict, config: runs.Config, stage: str
 ) -> dict[str, DataLoader]:
 
-    train_config = config["train"][stage]
+    train_config = config["stages"][stage]["train"]
     dataloaders: dict[str, DataLoader] = {}
     for split in ["train", "test"]:
         is_train = split == "train"

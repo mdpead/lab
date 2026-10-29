@@ -5,15 +5,23 @@ can add required fields after a base class's defaults). `parse` walks the YAML a
 fails on the first problem, naming its path: a misspelt or unknown key, a missing setting, or
 a value of the wrong type. Fields that can change without invalidating a stage's checkpoints
 are marked with `resumable()`, and the stage fingerprint in `mlcore.runs` reads that mark.
+
+Swappable components come from a `Registry`. A field annotated `Annotated[Base, REGISTRY]`
+takes a block like `{type: rms, eps: 1.0e-6}`: `type` picks a registered config class, which
+must subclass `Base`, and the rest of the block is checked against it.
 """
 
 import dataclasses
 import difflib
 import types
 import typing
-from typing import Any, Literal, Union
+from collections.abc import Callable
+from typing import Annotated, Any, Literal, Union
 
 RESUMABLE = "resumable"
+
+# A parsed config file, as the code reads it
+Config = dict[str, Any]
 
 
 class ConfigError(ValueError):
@@ -30,8 +38,37 @@ def resumable_keys(cls: type) -> frozenset[str]:
     return frozenset(f.name for f in dataclasses.fields(cls) if f.metadata.get(RESUMABLE))
 
 
+class Registry:
+    """Named implementations of one kind of component, each described by a config dataclass."""
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self._classes: dict[str, type] = {}
+
+    def register[T: type](self, name: str) -> Callable[[T], T]:
+        def decorator(cls: T) -> T:
+            if not dataclasses.is_dataclass(cls):
+                raise TypeError(f"{cls.__name__} must be a dataclass to register as a {self.kind}")
+            if name in self._classes:
+                raise ValueError(f"{self.kind} {name!r} is already registered")
+            self._classes[name] = cls
+            return cls
+
+        return decorator
+
+    def names(self, base: type = object) -> list[str]:
+        """Registered names whose config classes subclass `base`."""
+        return [name for name, cls in self._classes.items() if issubclass(cls, base)]
+
+    def get(self, name: str) -> type:
+        return self._classes[name]
+
+    def name_of(self, cls: type) -> str:
+        return next(name for name, c in self._classes.items() if c is cls)
+
+
 def field_type(cls: type, name: str) -> type:
-    """The declared type of a dataclass field, with `| None` removed."""
+    """The declared type of a dataclass field, with `| None` and `Annotated` removed."""
     hints = typing.get_type_hints(cls)
     if name not in hints:
         raise ConfigError(f"{cls.__name__} has no field {name!r}")
@@ -43,18 +80,49 @@ def field_type(cls: type, name: str) -> type:
     return hint
 
 
+def field_hint(cls: type, name: str) -> Any:
+    """The declared type of a dataclass field as written, `Annotated` registries included."""
+    hints = typing.get_type_hints(cls, include_extras=True)
+    if name not in hints:
+        raise ConfigError(f"{cls.__name__} has no field {name!r}")
+    return hints[name]
+
+
+def canonical(value: Any) -> Any:
+    """A comparable form of a parsed config, leaving out fields marked `resumable()`.
+
+    Dataclasses keep their class name, so two components with the same settings but of
+    different types (an RMSNorm and a LayerNorm with the same eps) still differ.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return (
+            type(value).__qualname__,
+            tuple(
+                (f.name, canonical(getattr(value, f.name)))
+                for f in dataclasses.fields(value)
+                if not f.metadata.get(RESUMABLE)
+            ),
+        )
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), canonical(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(canonical(v) for v in value)
+    return value
+
+
 def stage_class(schema: type, stage: str) -> type:
-    """The dataclass describing `train.<stage>` in a project's config schema."""
-    return field_type(field_type(schema, "train"), stage)
+    """The dataclass describing `stages.<stage>.train` in a project's config schema."""
+    return field_type(field_type(field_type(schema, "stages"), stage), "train")
 
 
-def parse[T](cls: type[T], data: Any, source: str | None = None) -> T:
+def parse[T](cls: type[T], data: Any, source: str | None = None, path: str = "") -> T:
     """Build `cls` from a parsed YAML mapping, or raise ConfigError naming what is wrong.
 
     Errors give the dotted path to the problem, after `source` (such as the file name).
+    `path` is where `data` sits in the whole config, when parsing just one section.
     """
     try:
-        return _convert(cls, data, "")
+        return _convert(cls, data, path)
     except ConfigError as e:
         if source is None:
             raise
@@ -84,6 +152,11 @@ def _convert(hint: Any, value: Any, path: str) -> Any:
     origin = typing.get_origin(hint)
     args = typing.get_args(hint)
 
+    if origin is Annotated:
+        registry = next((m for m in hint.__metadata__ if isinstance(m, Registry)), None)
+        if registry is None:
+            return _convert(args[0], value, path)
+        return _convert_registered(args[0], registry, value, path)
     if hint is Any:
         return value
     if hint is type(None):
@@ -169,7 +242,7 @@ def _convert_dataclass(cls: type, value: Any, path: str) -> Any:
             f"{_where(path)}: unknown key {key!r}{suggestion} (valid keys: {', '.join(fields)})"
         )
 
-    hints = typing.get_type_hints(cls)
+    hints = typing.get_type_hints(cls, include_extras=True)
     kwargs = {}
     for name, f in fields.items():
         if name in value:
@@ -181,3 +254,30 @@ def _convert_dataclass(cls: type, value: Any, path: str) -> Any:
     except ValueError as e:
         # A __post_init__ check across fields, reported at the section it applies to
         raise ConfigError(f"{_where(path)}: {e}") from e
+
+
+def _convert_registered(base: type, registry: Registry, value: Any, path: str) -> Any:
+    allowed = registry.names(base)
+    options = ", ".join(allowed)
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"{_where(path)}: expected a mapping with a 'type', got {_describe(value)}"
+        )
+    if "type" not in value:
+        raise ConfigError(f"{_where(path)}: missing 'type' (one of: {options})")
+
+    name = value["type"]
+    if name not in allowed:
+        if name in registry.names():
+            raise ConfigError(
+                f"{_where(path)}: {registry.kind} type {name!r} is not supported here "
+                f"(one of: {options})"
+            )
+        close = difflib.get_close_matches(str(name), allowed, n=1)
+        suggestion = f"; did you mean {close[0]!r}?" if close else ""
+        raise ConfigError(
+            f"{_where(path)}: unknown {registry.kind} type {name!r}{suggestion} (one of: {options})"
+        )
+
+    settings = {k: v for k, v in value.items() if k != "type"}
+    return _convert_dataclass(registry.get(name), settings, path)

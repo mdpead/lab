@@ -6,7 +6,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import logging
 
 from mlcore import runs, tokenizer
-from mlcore.models import decoder_only
+from mlcore.models import build_model
 
 from src import data, dataloader, rl
 from src.config import Config
@@ -31,17 +31,11 @@ def main() -> None:
 
     dataloaders = dataloader.create_dataloaders_rl(ds, token, config)
 
-    transformer = decoder_only.build_transformer(config)
+    transformer = build_model(config)
 
-    rl.train_rl(
-        "rl",
-        transformer,
-        dataloaders,
-        token,
-        config,
-        # From SFT: a pretrained model never emits the answer marker, so every reward is 0.
-        init_from=runs.get_stage_path(config, "sft"),
-    )
+    # Starts from SFT (stages.rl.init_from): a pretrained model never emits the answer
+    # marker, so every reward would be 0.
+    rl.train_rl("rl", transformer, dataloaders, token, config)
 
 
 if __name__ == "__main__":

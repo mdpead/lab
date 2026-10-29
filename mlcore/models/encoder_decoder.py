@@ -5,27 +5,61 @@ breaks loading them.
 """
 
 from dataclasses import dataclass
+from typing import Annotated, Any
 
 import torch
 from torch import Tensor, nn
 
 from mlcore.layers import (
+    ATTENTIONS,
+    FEEDFORWARDS,
+    NORMS,
+    POSITIONS,
+    DenseFeedForwardConfig,
     Embedding,
-    LayerNorm,
-    MultiHeadAttention,
-    PositionWiseFeedForward,
-    SinusoidalPositionalEncoding,
+    MultiHeadAttentionConfig,
+    NormConfig,
+    SinusoidalConfig,
 )
-from mlcore.runs import Config
+from mlcore.models.registry import MODELS
+
+
+@MODELS.register("encoder_decoder")
+@dataclass(frozen=True, kw_only=True)
+class ModelConfig:
+    """A post-norm encoder-decoder Transformer, as the `model` section describes it.
+
+    The vocabulary size comes from `tokenizer.vocab_size`.
+    """
+
+    d_model: int
+    num_enc_layers: int
+    num_dec_layers: int
+    max_length: int
+    dropout: float
+    norm: Annotated[NormConfig, NORMS]
+    position: Annotated[SinusoidalConfig, POSITIONS]
+    attention: Annotated[MultiHeadAttentionConfig, ATTENTIONS]
+    feedforward: Annotated[DenseFeedForwardConfig, FEEDFORWARDS]
+
+    def __post_init__(self) -> None:
+        if self.d_model % self.attention.num_heads:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be a multiple of attention.num_heads "
+                f"({self.attention.num_heads})"
+            )
+
+    def build(self, vocab_size: int) -> "Transformer":
+        return Transformer(self, vocab_size).apply(init_weights)
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.attention = MultiHeadAttention(d_model, num_heads, dropout)
-        self.feedforward = PositionWiseFeedForward(d_model, d_ff, bias=True)
-        self.layer_norms = nn.ModuleList([LayerNorm(d_model) for _ in range(0, 2)])
-        self.dropout = nn.Dropout(dropout)
+        self.attention = config.attention.build(config.d_model, config.dropout)
+        self.feedforward = config.feedforward.build(config.d_model)
+        self.layer_norms = nn.ModuleList([config.norm.build(config.d_model) for _ in range(0, 2)])
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, src: Tensor, attn_mask: Tensor) -> Tensor:
         x = src
@@ -37,13 +71,9 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(
-        self, d_model: int, num_heads: int, d_ff: int, num_enc_layers: int, dropout: float
-    ) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.layers = nn.ModuleList(
-            [EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_enc_layers)]
-        )
+        self.layers = nn.ModuleList([EncoderLayer(config) for _ in range(config.num_enc_layers)])
 
     def make_attn_mask(self, q_padding_mask: Tensor, k_padding_mask: Tensor) -> Tensor:
         padding_mask = q_padding_mask.unsqueeze(-1) & k_padding_mask.unsqueeze(-2)
@@ -57,13 +87,13 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.self_attention = MultiHeadAttention(d_model, num_heads, dropout)
-        self.cross_attention = MultiHeadAttention(d_model, num_heads, dropout)
-        self.feedforward = PositionWiseFeedForward(d_model, d_ff, bias=True)
-        self.layer_norms = nn.ModuleList([LayerNorm(d_model) for _ in range(0, 3)])
-        self.dropout = nn.Dropout(dropout)
+        self.self_attention = config.attention.build(config.d_model, config.dropout)
+        self.cross_attention = config.attention.build(config.d_model, config.dropout)
+        self.feedforward = config.feedforward.build(config.d_model)
+        self.layer_norms = nn.ModuleList([config.norm.build(config.d_model) for _ in range(0, 3)])
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(
         self,
@@ -83,13 +113,9 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(
-        self, d_model: int, num_heads: int, d_ff: int, num_dec_layers: int, dropout: float
-    ) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.layers = nn.ModuleList(
-            [DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_dec_layers)]
-        )
+        self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.num_dec_layers)])
 
     def make_self_attn_mask(self, q_padding_mask: Tensor, k_padding_mask: Tensor) -> Tensor:
         padding_mask = q_padding_mask.unsqueeze(-1) & k_padding_mask.unsqueeze(-2)
@@ -131,25 +157,16 @@ class Output(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        d_ff: int,
-        num_enc_layers: int,
-        num_dec_layers: int,
-        vocab_size: int,
-        max_length: int,
-        dropout: float,
-    ) -> None:
+    def __init__(self, config: ModelConfig, vocab_size: int) -> None:
         super().__init__()
-        self.src_embedding = Embedding(vocab_size, d_model)
-        self.tgt_embedding = Embedding(vocab_size, d_model)
-        self.positional_encoder = SinusoidalPositionalEncoding(d_model, max_length)
-        self.encoder = Encoder(d_model, num_heads, d_ff, num_enc_layers, dropout)
-        self.decoder = Decoder(d_model, num_heads, d_ff, num_dec_layers, dropout)
-        self.output = Output(d_model, vocab_size)
-        self.dropout = nn.Dropout(dropout)
+        self.config = config
+        self.src_embedding = Embedding(vocab_size, config.d_model)
+        self.tgt_embedding = Embedding(vocab_size, config.d_model)
+        self.positional_encoder = config.position.build(config.d_model, config.max_length)
+        self.encoder = Encoder(config)
+        self.decoder = Decoder(config)
+        self.output = Output(config.d_model, vocab_size)
+        self.dropout = nn.Dropout(config.dropout)
 
     def encode(self, src: Tensor, src_padding_mask: Tensor) -> Tensor:
         src_emb = self.dropout(self.positional_encoder(self.src_embedding(src)))
@@ -189,35 +206,21 @@ def init_weights(m: nn.Module) -> None:
         nn.init.normal_(m.E, mean=0.0, std=0.02)
 
 
-@dataclass(frozen=True, kw_only=True)
-class ModelConfig:
-    """The `model` section that build_transformer reads for the encoder-decoder Transformer.
+def upgrade_legacy(model: dict[str, Any]) -> dict[str, Any]:
+    """The `model` section in today's form, from a config saved before components were named.
 
-    The vocabulary size comes from `tokenizer.vocab_size`.
+    Those configs listed flat sizes, and always meant LayerNorm, sinusoidal positions,
+    multi-head attention and a ReLU feed-forward with biases.
     """
-
-    d_model: int
-    num_heads: int
-    d_ff: int
-    num_enc_layers: int
-    num_dec_layers: int
-    max_length: int
-    dropout: float
-
-
-def build_transformer(config: Config) -> Transformer:
-
-    model_config = config["model"]
-
-    transformer = Transformer(
-        model_config["d_model"],
-        model_config["num_heads"],
-        model_config["d_ff"],
-        model_config["num_enc_layers"],
-        model_config["num_dec_layers"],
-        config["tokenizer"]["vocab_size"],
-        model_config["max_length"],
-        model_config["dropout"],
-    )
-    transformer = transformer.apply(init_weights)
-    return transformer
+    return {
+        "type": "encoder_decoder",
+        "d_model": model["d_model"],
+        "num_enc_layers": model["num_enc_layers"],
+        "num_dec_layers": model["num_dec_layers"],
+        "max_length": model["max_length"],
+        "dropout": model["dropout"],
+        "norm": {"type": "layer"},
+        "position": {"type": "sinusoidal"},
+        "attention": {"type": "mha", "num_heads": model["num_heads"]},
+        "feedforward": {"type": "relu", "d_ff": model["d_ff"], "bias": True},
+    }

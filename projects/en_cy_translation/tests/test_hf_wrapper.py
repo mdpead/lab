@@ -3,6 +3,7 @@ import os
 import pytest
 import torch
 from mlcore import runs, training
+from mlcore.models import build_model
 
 from src import generation
 from src.config import Config
@@ -15,8 +16,8 @@ def make_hf_model(config, transformer):
     hf_config = EnCyConfig(
         vocab_size=config["tokenizer"]["vocab_size"],
         d_model=model_cfg["d_model"],
-        num_heads=model_cfg["num_heads"],
-        d_ff=model_cfg["d_ff"],
+        num_heads=model_cfg["attention"]["num_heads"],
+        d_ff=model_cfg["feedforward"]["d_ff"],
         num_enc_layers=model_cfg["num_enc_layers"],
         num_dec_layers=model_cfg["num_dec_layers"],
         max_length=model_cfg["max_length"],
@@ -141,7 +142,7 @@ def test_generate_accepts_tokenizer_output(config, transformer, tok):
 
 def test_from_run_loads_latest_checkpoint(config, transformer, tok):
     stage_path = runs.init_run(config, STAGE, Config)
-    run = training.create_run(transformer, config["train"][STAGE], tok)
+    run = training.create_run(transformer, config["stages"][STAGE]["train"], tok)
     args = run["optimiser"], run["lr_scheduler"], run["scaler"], stage_path
     training.save_checkpoint(torch.nn.Linear(1, 1), *args, 1, [])
     training.save_checkpoint(transformer, *args, 10, [])
@@ -157,4 +158,40 @@ def test_from_run_loads_latest_checkpoint(config, transformer, tok):
 def test_from_run_without_checkpoints_raises(config):
     stage_path = runs.init_run(config, STAGE, Config)
     with pytest.raises(FileNotFoundError):
+        EnCyForTranslation.from_run(stage_path)
+
+
+def _save_run(config, transformer, tok):
+    stage_path = runs.init_run(config, STAGE, Config)
+    run = training.create_run(transformer, config["stages"][STAGE]["train"], tok)
+    args = run["optimiser"], run["lr_scheduler"], run["scaler"], stage_path
+    training.save_checkpoint(transformer, *args, 1, [])
+    return stage_path
+
+
+def test_from_run_loads_a_run_saved_with_the_flat_model_section(config, transformer, tok):
+    """Runs saved before named components list flat sizes in their model section."""
+    stage_path = _save_run(config, transformer, tok)
+    saved = runs.load_config(stage_path)
+    saved["model"] = {
+        "d_model": 32,
+        "num_heads": 4,
+        "d_ff": 64,
+        "num_enc_layers": 2,
+        "num_dec_layers": 2,
+        "max_length": 32,
+        "dropout": 0.1,
+    }
+    runs.save_config(stage_path, saved)
+
+    hf_model = EnCyForTranslation.from_run(stage_path)
+
+    for key, value in transformer.state_dict().items():
+        assert torch.equal(hf_model.transformer.state_dict()[key], value)
+
+
+def test_from_run_refuses_an_architecture_the_hub_format_cannot_describe(config, tok):
+    config["model"]["feedforward"] = {"type": "swiglu", "d_ff": 64}
+    stage_path = _save_run(config, build_model(config), tok)
+    with pytest.raises(ValueError, match="only the original architecture"):
         EnCyForTranslation.from_run(stage_path)

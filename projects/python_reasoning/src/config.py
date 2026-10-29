@@ -1,12 +1,12 @@
 """The schema for configs/<name>.yaml, checked when a script loads its config."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 from mlcore.config import resumable
-from mlcore.models import decoder_only
+from mlcore.models import MODELS, decoder_only
 from mlcore.runs import RunConfig
-from mlcore.training import SupervisedStage, TrainStage
+from mlcore.training import StageConfig, SupervisedStage, TrainStage
 
 Tier = Literal["easy", "medium", "hard"]
 Task = Literal["output", "input", "search"]
@@ -20,7 +20,7 @@ class TokenizerConfig:
 
 
 @dataclass(frozen=True, kw_only=True)
-class LMStage(SupervisedStage):
+class LMTrain(SupervisedStage):
     """Pretraining and SFT: the supervised loop with the MoE load-balancing loss."""
 
     router_aux_loss_coef: float
@@ -36,7 +36,7 @@ class RewardOptions:
 
 
 @dataclass(frozen=True, kw_only=True)
-class RLStage(TrainStage):
+class RLTrain(TrainStage):
     router_aux_loss_coef: float
     generation_prompts_size: int
     effective_prompts_size: int
@@ -47,13 +47,6 @@ class RLStage(TrainStage):
     validation_samples: int | None = None
     advantage_sd_floor: float = 1e-8
     reward_options: RewardOptions | None = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class Stages:
-    pretrain: LMStage | None = None
-    sft: LMStage | None = None
-    rl: RLStage | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -80,15 +73,35 @@ class SFTData(SynthData):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Data:
-    pretrain: PretrainData | None = None
-    sft: SFTData | None = None
-    rl: SynthData | None = None
+class PretrainStage(StageConfig):
+    """Pretraining on StarCoder. A config can give only `data`, the corpus the tokenizer is
+    trained on, and no `train` section when it does not pretrain."""
+
+    train: LMTrain | None = None
+    data: PretrainData
+
+
+@dataclass(frozen=True, kw_only=True)
+class SFTStage(StageConfig):
+    train: LMTrain
+    data: SFTData
+
+
+@dataclass(frozen=True, kw_only=True)
+class RLStage(StageConfig):
+    train: RLTrain
+    data: SynthData
+
+
+@dataclass(frozen=True, kw_only=True)
+class Stages:
+    pretrain: PretrainStage | None = None
+    sft: SFTStage | None = None
+    rl: RLStage | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
-    model: decoder_only.ModelConfig
+    model: Annotated[decoder_only.ModelConfig, MODELS]
     tokenizer: TokenizerConfig
-    train: Stages
-    data: Data
+    stages: Stages

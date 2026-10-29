@@ -234,7 +234,7 @@ What changed is how the model searches. On 96 test prompts decoded greedily befo
 
 Before RL the model stops after three attempts whether or not it has reached the target, because SFT never showed it more than two misses, and it often answers with a guess it has just watched fail. After RL it has almost stopped repeating guesses and it keeps searching. The last row is the limit: nearly every success is still a first-attempt hit. The later guesses are no longer repeats, but they are not yet informed by the miss before them.
 
-That run gave a wrong answer partial credit only for returned values that were exactly right. Two graded alternatives exist, chosen by `train.rl.reward_options.partial_credit`:
+That run gave a wrong answer partial credit only for returned values that were exactly right. Two graded alternatives exist, chosen by `stages.rl.train.reward_options.partial_credit`:
 
 - Grading the answer by how near its result came to the target was tried once, at three times the learning rate, and that run collapsed (below). The answer is the last attempt, so this version can also score stopping early above searching on, and it was dropped.
 - `closest` grades the rollout by its best guess instead of its last, so that searching on is never penalised. It has not been evaluated yet.

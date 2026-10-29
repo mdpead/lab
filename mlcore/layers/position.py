@@ -1,5 +1,9 @@
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
+
+from mlcore.config import Registry
 
 
 class RotaryPositionalEncoding(nn.Module):
@@ -90,3 +94,24 @@ class SinusoidalPositionalEncoding(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         x = x + self.PE[: x.shape[1], :].unsqueeze(0)
         return x
+
+
+POSITIONS = Registry("position")
+
+
+@POSITIONS.register("rope")
+@dataclass(frozen=True, kw_only=True)
+class RotaryConfig:
+    """Rotary embeddings, applied to queries and keys inside attention."""
+
+    def build(self, d_h: int, max_length: int) -> RotaryPositionalEncoding:
+        return RotaryPositionalEncoding(d_h, max_length)
+
+
+@POSITIONS.register("sinusoidal")
+@dataclass(frozen=True, kw_only=True)
+class SinusoidalConfig:
+    """Fixed sinusoidal encodings, added to the embeddings."""
+
+    def build(self, d_model: int, max_length: int) -> SinusoidalPositionalEncoding:
+        return SinusoidalPositionalEncoding(d_model, max_length)

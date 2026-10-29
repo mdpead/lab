@@ -9,7 +9,13 @@ import torch
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from mlcore.models.decoder_only import Transformer
+from mlcore.layers import (
+    GroupedQueryAttentionConfig,
+    MixtureOfExpertsConfig,
+    RMSNormConfig,
+    RotaryConfig,
+)
+from mlcore.models.decoder_only import ModelConfig, Transformer
 
 
 def pytest_addoption(parser):
@@ -83,21 +89,25 @@ def make_model():
         capacity_factor=4.0,
     ):
         torch.manual_seed(0)
-        model = Transformer(
+        config = ModelConfig(
             d_model=64,
-            num_heads=num_heads,
-            num_kv_heads=num_kv_heads,
-            d_h=16,
-            d_ff=128,
-            num_experts=4,
-            top_k=2,
-            # High enough by default that no token is dropped; capacity tests pass their own
-            capacity_factor=capacity_factor,
             num_layers=num_layers,
-            vocab_size=vocab_size,
             max_length=max_length,
             dropout=0.0,
+            norm=RMSNormConfig(),
+            position=RotaryConfig(),
+            attention=GroupedQueryAttentionConfig(
+                num_heads=num_heads, num_kv_heads=num_kv_heads, d_h=16
+            ),
+            feedforward=MixtureOfExpertsConfig(
+                d_ff=128,
+                num_experts=4,
+                top_k=2,
+                # High enough by default that no token is dropped; capacity tests pass their own
+                capacity_factor=capacity_factor,
+            ),
         )
+        model = Transformer(config, vocab_size)
         return model.to("cuda").to(torch.float16).eval()
 
     return _make

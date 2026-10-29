@@ -19,14 +19,16 @@ def _config(tokenizer, num_records, max_length=512, ratio=0.1, tasks=("output",)
     return {
         "seed": 0,
         "model": {"max_length": max_length},
-        "data": {
+        "stages": {
             "sft": {
-                "num_records": num_records,
-                "tier": "easy",
-                "tasks": list(tasks),
-                "inputs_per_fn": 4,
-                "with_trace": True,
-                "test_split_ratio": ratio,
+                "data": {
+                    "num_records": num_records,
+                    "tier": "easy",
+                    "tasks": list(tasks),
+                    "inputs_per_fn": 4,
+                    "with_trace": True,
+                    "test_split_ratio": ratio,
+                }
             }
         },
     }
@@ -106,18 +108,22 @@ def test_rows_longer_than_the_context_are_dropped(tokenizer):
 def test_rl_prompts_are_not_the_sft_functions(tokenizer):
     """RL scores answers, so functions sft showed the answers to would reward recall."""
     cfg = _config(tokenizer, 400)
-    cfg["data"]["rl"] = {
-        "num_records": 200,
-        "tier": "easy",
-        "tasks": ["output"],
-        "inputs_per_fn": 4,
-        "test_split_ratio": 0.1,
+    cfg["stages"]["rl"] = {
+        "data": {
+            "num_records": 200,
+            "tier": "easy",
+            "tasks": ["output"],
+            "inputs_per_fn": 4,
+            "test_split_ratio": 0.1,
+        }
     }
 
     def rl_sources():
         return {row["source"] for rows in data.get_dataset_rl(cfg).values() for row in rows}
 
-    sft_sources = {r["source"] for r in data._synth_records(cfg["data"]["sft"], cfg["seed"], True)}
+    sft_sources = {
+        r["source"] for r in data._synth_records(cfg["stages"]["sft"]["data"], cfg["seed"], True)
+    }
 
     assert rl_sources(), "rl generated nothing"
     # Chance collisions between the two streams are allowed; sharing a stream is not

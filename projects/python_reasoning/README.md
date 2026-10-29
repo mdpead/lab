@@ -113,7 +113,7 @@ Everything is driven by the YAML files in `configs/`. Each value there carries a
 
 The tokenizer and pretraining stages download part of StarCoder from Hugging Face, which needs an account that has accepted the dataset's terms.
 
-The tokenizer is its own stage, so a configuration can skip pretraining. `sft_only` has no pretrain stage: run `scripts.tokenizer`, then `scripts.sft`, which trains from random init because the config sets no `train.sft.init_from_step`.
+The tokenizer is its own stage, so a configuration can skip pretraining. `sft_only` has no pretrain stage: run `scripts.tokenizer`, then `scripts.sft`, which trains from random init because the config sets no `stages.sft.init_from`.
 
 `base` fine-tunes at 1e-4, which underfits. To reproduce the best result, run `base`'s tokenizer and pretrain stages, then `scripts.sft` and `scripts.rl` with `--config base_lr3`, which starts from `base`'s pretrained weights at 3e-4. Its run directory has to be seeded by hand first; the commands are in the comment at the top of `configs/base_lr3.yaml`.
 
@@ -171,7 +171,7 @@ The shared code lives in [`mlcore`](../../mlcore) at the repo root:
 ```
 mlcore/
   layers/               GQA, RoPE, RMSNorm, SwiGLU, mixture of experts
-  models/decoder_only   The Transformer and build_transformer
+  models/               The decoder-only Transformer, built from the config's model section
   kernels/              Triton kernels, including flash attention forward and backward
   generation.py         Batched sampling with a KV cache
   training.py           Checkpoints, resume, stage seeding, LR schedules

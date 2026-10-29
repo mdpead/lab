@@ -1,11 +1,12 @@
 """The schema for configs/<name>.yaml, checked when a script loads its config."""
 
 from dataclasses import dataclass
+from typing import Annotated
 
 from mlcore.config import resumable
-from mlcore.models import encoder_decoder
+from mlcore.models import MODELS, encoder_decoder
 from mlcore.runs import RunConfig
-from mlcore.training import SupervisedStage
+from mlcore.training import StageConfig, SupervisedStage
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -17,13 +18,8 @@ class TokenizerConfig:
 
 
 @dataclass(frozen=True, kw_only=True)
-class TranslationStage(SupervisedStage):
+class TranslationTrain(SupervisedStage):
     num_workers: int = resumable(0)
-
-
-@dataclass(frozen=True, kw_only=True)
-class Stages:
-    translation: TranslationStage
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -34,13 +30,18 @@ class TranslationData:
 
 
 @dataclass(frozen=True, kw_only=True)
-class Data:
-    translation: TranslationData
+class TranslationStage(StageConfig):
+    train: TranslationTrain
+    data: TranslationData
+
+
+@dataclass(frozen=True, kw_only=True)
+class Stages:
+    translation: TranslationStage
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
-    model: encoder_decoder.ModelConfig
+    model: Annotated[encoder_decoder.ModelConfig, MODELS]
     tokenizer: TokenizerConfig
-    train: Stages
-    data: Data
+    stages: Stages
