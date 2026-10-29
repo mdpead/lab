@@ -1,51 +1,17 @@
 import itertools
+from collections.abc import Iterable
 from typing import Any
 
 from lab import runs
 from lab import tokenizer as tokenizer_utils
-from tokenizers import (
-    Tokenizer,
-    decoders,
-    models,
-    normalizers,
-    pre_tokenizers,
-    processors,
-    trainers,
-)
 from transformers import PreTrainedTokenizerFast
 
 from datasets import DatasetDict
 
 
-def create_tokenizer(ds: DatasetDict, tokenizer_config: dict[str, Any]) -> PreTrainedTokenizerFast:
-    tokenizer = Tokenizer(models.WordPiece(unk_token="[UNK]"))
-    tokenizer.normalizer = normalizers.Sequence([normalizers.NFD(), normalizers.StripAccents()])
-    tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
-    special_tokens = ["[BOS]", "[EOS]", "[PAD]", "[MASK]", "[UNK]"]
-    tokenizer.model = models.WordPiece(unk_token="[UNK]")
-    trainer = trainers.WordPieceTrainer(
-        vocab_size=tokenizer_config["vocab_size"], special_tokens=special_tokens
-    )
-    combined_text = itertools.chain(ds["train"]["text_en"], ds["train"]["text_cy"])
-    train_iter = itertools.islice(combined_text, tokenizer_config["training_size"])
-    tokenizer.train_from_iterator(train_iter, trainer)
-    tokenizer.post_processor = processors.TemplateProcessing(
-        single="[BOS] $A [EOS]",
-        special_tokens=[
-            ("[BOS]", tokenizer.token_to_id("[BOS]")),
-            ("[EOS]", tokenizer.token_to_id("[EOS]")),
-        ],
-    )
-    tokenizer.decoder = decoders.WordPiece(prefix="##")
-
-    return PreTrainedTokenizerFast(
-        tokenizer_object=tokenizer,
-        bos_token="[BOS]",
-        eos_token="[EOS]",
-        pad_token="[PAD]",
-        mask_token="[MASK]",
-        unk_token="[UNK]",
-    )
+def corpus(ds: DatasetDict) -> Iterable[str]:
+    """The tokenizer trains on both languages' training sentences."""
+    return itertools.chain(ds["train"]["text_en"], ds["train"]["text_cy"])
 
 
 def _tokenize_text(
@@ -77,4 +43,4 @@ def tokenize_dataset(
 
 
 def get_tokenizer(ds: DatasetDict, config: runs.Config) -> PreTrainedTokenizerFast:
-    return tokenizer_utils.get_tokenizer(ds, config, create_tokenizer)
+    return tokenizer_utils.get_tokenizer(ds, config, corpus)

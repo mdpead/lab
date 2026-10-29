@@ -3,20 +3,14 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from lab.config import resumable
+from lab.config import Component, resumable
 from lab.models import MODELS, decoder_only
 from lab.runs import RunConfig
+from lab.tokenizer import TOKENIZERS
 from lab.training import StageConfig, SupervisedStage, TrainStage
 
 Tier = Literal["easy", "medium", "hard"]
 Task = Literal["output", "input", "search"]
-
-
-@dataclass(frozen=True, kw_only=True)
-class TokenizerConfig:
-    vocab_size: int
-    training_size: int
-    digit_split: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -103,5 +97,5 @@ class Stages:
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
     model: Annotated[decoder_only.ModelConfig, MODELS]
-    tokenizer: TokenizerConfig
+    tokenizer: Annotated[Component, TOKENIZERS.only("bpe")]
     stages: Stages

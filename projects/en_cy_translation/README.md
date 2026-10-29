@@ -139,7 +139,7 @@ ruff check . && ruff format --check .   # lint and formatting
 │   ├── check_overlap.py  # FLORES+ / training data overlap check
 │   └── push_to_hub.py
 └── src/
-    ├── tokenizer.py  # WordPiece tokenizer
+    ├── tokenizer.py  # WordPiece training text and dataset tokenization
     ├── datasets.py   # Dataset loading
     ├── dataloader.py # Collation and token-budget DataLoaders
     ├── train.py      # Training loop and BLEU validation

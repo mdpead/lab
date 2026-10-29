@@ -1,10 +1,12 @@
 """One-off: rewrite the config.json files saved in run directories to the current config layout.
 
 Runs started before models were built from named components saved their config with flat
-model sizes and separate `train.<stage>` and `data.<stage>` sections. The code no longer reads
-that layout, so a saved config in it no longer matches and the stage would be cleared. This
-rewrites each one to the layout configs/*.yaml now use, keeping the checkpoints, so rerunning
-a stage resumes it. Each file it changes is first copied to config.json.bak.
+model sizes and separate `train.<stage>` and `data.<stage>` sections. Runs started before
+tokenizers moved into the lab package saved a tokenizer section without a `type`. The code no
+longer reads either, so a saved config in them no longer matches and the stage, or the saved
+tokenizer, would be cleared. This rewrites each one to the layout configs/*.yaml now use,
+keeping the tokenizer and checkpoints, so rerunning a stage resumes it. Each file it changes
+is first copied to config.json.bak, unless an earlier run of this script already made one.
 
     python tools/migrate_saved_configs.py projects/python_reasoning/models --dry-run
     python tools/migrate_saved_configs.py projects/python_reasoning/models \
@@ -65,8 +67,26 @@ def migrate_model(model: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def migrate(config: dict[str, Any]) -> dict[str, Any]:
-    """A saved config in the current layout. Values are kept; only their places change."""
+# python_reasoning's markers and spare slots, which its tokenizer code listed before
+REASONING_SPECIAL_TOKENS = ["<|think|>", "<|/think|>", "<|answer|>", "<|/answer|>"]
+
+
+def migrate_tokenizer(tokenizer: dict[str, Any], model_type: str) -> dict[str, Any]:
+    """A tokenizer section without a type, as the project owning `model_type` built it."""
+    if model_type == "encoder_decoder":
+        # en_cy_translation's WordPiece; the pad id now comes from the tokenizer itself
+        settings = {k: v for k, v in tokenizer.items() if k != "pad_token_id"}
+        return {"type": "wordpiece", **settings, "strip_accents": True}
+    return {
+        "type": "bpe",
+        **tokenizer,
+        "special_tokens": REASONING_SPECIAL_TOKENS,
+        "reserved_tokens": 16,
+    }
+
+
+def migrate_layout(config: dict[str, Any]) -> dict[str, Any]:
+    """Named model components and a stages section, from the flat layout."""
     train, data = config.get("train", {}), config.get("data", {})
     stages: dict[str, Any] = {}
     for stage in {**train, **data}:
@@ -94,6 +114,16 @@ def is_old_layout(config: dict[str, Any]) -> bool:
     return "stages" not in config and ("train" in config or "type" not in config.get("model", {}))
 
 
+def migrate(config: dict[str, Any]) -> dict[str, Any]:
+    """A saved config in the current layout. Values are kept; only their places change."""
+    if is_old_layout(config):
+        config = migrate_layout(config)
+    if "tokenizer" in config and "type" not in config["tokenizer"]:
+        tokenizer = migrate_tokenizer(config["tokenizer"], config["model"]["type"])
+        config = {**config, "tokenizer": tokenizer}
+    return config
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("models_dirs", nargs="+", type=Path, help="Directories of runs")
@@ -107,13 +137,16 @@ def main() -> int:
             continue
         for path in sorted(models_dir.rglob("config.json")):
             config = json.loads(path.read_text())
-            if not is_old_layout(config):
+            migrated = migrate(config)
+            if migrated == config:
                 print(f"already current  {path}")
                 continue
             print(f"{'would migrate' if args.dry_run else 'migrating'}    {path}")
             if not args.dry_run:
-                shutil.copy2(path, path.with_name("config.json.bak"))
-                path.write_text(json.dumps(migrate(config)))
+                backup = path.with_name("config.json.bak")
+                if not backup.exists():
+                    shutil.copy2(path, backup)
+                path.write_text(json.dumps(migrated))
             changed += 1
     print(f"{changed} config(s) {'to migrate' if args.dry_run else 'migrated'}")
     return 0

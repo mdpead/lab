@@ -23,7 +23,7 @@ plugs in, and how each change was checked to leave results unchanged.
 the same whatever the task: gradient accumulation, mixed precision, clipping, the validation
 and checkpoint schedule, exact resume, run directories, and checking configs. The project
 decides what a batch contains, what the loss is, what counts as a good result, and how its
-data and tokenizer are built.
+data is built and what text its tokenizer learns from.
 
 The config follows the same line. The package declares the settings it reads, and a project's
 schema subclasses those classes to add its own, so every key in a config file belongs to
@@ -37,7 +37,7 @@ later move followed the same rule:
 |---|---|
 | The RL loop (`python_reasoning/src/rl.py`) | One user, and it does not fit the supervised shape: it generates rollouts, scores them by running code, and trains on group-relative advantages. It still uses `training.train` for resume and checkpoints. |
 | Encoder-decoder decoding (`en_cy_translation/src/generation.py`, greedy, for BLEU during training; beam search comes from its Hugging Face wrapper) | One user. `lab.generation` is the decoder-only KV-cache path the reasoning project needs. |
-| Batch collation, data preparation, tokenizer training | Task-specific by nature: they decide what a batch means. |
+| Batch collation, data preparation, the text a tokenizer trains on | Task-specific by nature: they decide what a batch means. |
 | BLEU, execution-checked answers | The task's definition of success, passed to the library as a callback. |
 | Data and task settings in the config | Only the project reads them, so only its schema declares them. |
 
@@ -56,8 +56,9 @@ subclassing the training code:
 | `tokens_key` | the batch field whose non-pad tokens count towards throughput | `training.supervised_loop` |
 | `validation_metrics` | `(model, batch) -> dict[str, float]`, optional | `training.supervised_loop` |
 | `loop` | `(stage, model, dataloaders, tokenizer, run, config) -> None` | `training.train` |
-| `create_tokenizer` | `(datasets, tokenizer_config) -> PreTrainedTokenizerFast` | `tokenizer.get_tokenizer` |
+| `corpus` | `(datasets) -> Iterable[str]`, the text the tokenizer trains on | `tokenizer.get_tokenizer` |
 | A component | an `nn.Module` registered with `@NORMS.register("name")` (or `FEEDFORWARDS`, `ATTENTIONS`, `POSITIONS`); its constructor is its config | `model.*` blocks with that `type` |
+| A tokenizer | a class registered with `@TOKENIZERS.register("name")` whose `train(texts)` returns a `PreTrainedTokenizerFast`; its constructor is its config | the `tokenizer` section with that `type` |
 | A schema | frozen dataclasses subclassing `RunConfig`, `StageConfig` and `TrainStage` or `SupervisedStage` | `runs.parse_config`, `runs.init_run` |
 
 The translation project's whole training module is a loss, a BLEU callback and two calls into
@@ -135,7 +136,7 @@ stages:
     init_from: {stage: pretrain, step: 10000}
     train: {learning_rate: 3.0e-4, ...}
     data: {tier: easy, tasks: [output], ...}
-tokenizer: {...}
+tokenizer: {type: bpe, vocab_size: 32000, training_size: 50000, digit_split: true, ...}
 locations: {models_dir: ./models}
 ```
 
@@ -154,7 +155,8 @@ configs/base.yaml: model.feedforward: feedforward type 'moe' is not supported he
 | `model` | the family's `ModelConfig` (`decoder_only`, `encoder_decoder`), chosen by `type`; each component block by its layer's constructor |
 | `stages.<stage>.init_from` | `training.InitFrom`: the earlier stage, and optionally the checkpoint step, a stage's weights start from |
 | `stages.<stage>.train` | `training.TrainStage` (any stage) or `SupervisedStage` (a stage `supervised_loop` runs), with the project's own fields added |
-| `stages.<stage>.data`, `tokenizer` | the project's schema |
+| `tokenizer` | the tokenizer's constructor, chosen by `type`: `wordpiece` or `bpe` (`lab.tokenizer.TOKENIZERS`) |
+| `stages.<stage>.data` | the project's schema |
 
 **Which changes restart a stage** is declared on the setting. Fields marked `resumable()`, such
 as `num_steps`, `checkpoint_steps` and `compile_model`, can change and the stage resumes;
@@ -200,6 +202,7 @@ models/<name>/
 | Share the test fixtures ([#7](https://github.com/mdpead/lab/pull/7)) | The same tests collected and passing in all three suites before and after. |
 | Check configs against typed schemas ([#10](https://github.com/mdpead/lab/pull/10)) | Every config file parses; the schema's resumable fields give the same fingerprint as the old hard-coded key list for every stage of every config. |
 | Build models from named components, stage-first configs ([#11](https://github.com/mdpead/lab/pull/11)) | Against fixtures recorded from the old code: identical seeded weights for both families, identical parameter names, shapes and counts for every config, and bitwise-identical encoder-decoder outputs. Each rewritten config holds the same values. A one-off script migrates saved runs; on run folders recreated in the old layout, every stage resumed with its checkpoint. |
+| Share the tokenizers ([#14](https://github.com/mdpead/lab/pull/14)) | Against fixtures recorded from each project's tokenizer code: an identical serialized BPE tokenizer, with and without digit splitting. WordPiece training breaks ties randomly, so its learned vocabulary differs between runs of the old code too; its normalizer, pre-tokenizer, decoder, post-processor and special-token ids are identical. The migration script brings saved configs to the new section, so trained tokenizers are kept. |
 
 ## Testing
 
@@ -208,7 +211,7 @@ a Triton kernel are marked `cuda` and skip without a GPU; CI runs the rest on ev
 `lab.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
 conftest with `pytest_plugins = ["lab.testing"]`. `tests/fixtures/` and each project's
 `tests/fixtures/` hold the model layouts and weight hashes recorded from the code before #11,
-which the model tests compare against.
+which the model tests compare against, and the tokenizers recorded before #14.
 
 ## Limitations and next steps
 

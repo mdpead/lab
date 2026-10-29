@@ -3,18 +3,11 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from lab.config import resumable
+from lab.config import Component, resumable
 from lab.models import MODELS, encoder_decoder
 from lab.runs import RunConfig
+from lab.tokenizer import TOKENIZERS
 from lab.training import StageConfig, SupervisedStage
-
-
-@dataclass(frozen=True, kw_only=True)
-class TokenizerConfig:
-    vocab_size: int
-    pad_token_id: int
-    # Sentences to train the tokenizer on; null uses the whole train split
-    training_size: int | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -43,5 +36,5 @@ class Stages:
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
     model: Annotated[encoder_decoder.ModelConfig, MODELS]
-    tokenizer: TokenizerConfig
+    tokenizer: Annotated[Component, TOKENIZERS.only("wordpiece")]
     stages: Stages

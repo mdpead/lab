@@ -6,6 +6,7 @@ import torch
 from lab import runs
 from lab.data.samplers import TokenSampler
 from torch.utils.data import DataLoader
+from transformers import PreTrainedTokenizerFast
 
 from datasets import DatasetDict
 
@@ -42,7 +43,7 @@ def make_collate_fn(pad_token_id: int) -> Callable[[list[dict[str, Any]]], dict[
 
 
 def create_dataloaders(
-    ds_tokenized: DatasetDict, config: runs.Config, stage: str
+    ds_tokenized: DatasetDict, tokenizer: PreTrainedTokenizerFast, config: runs.Config, stage: str
 ) -> dict[str, DataLoader]:
 
     train_config = config["stages"][stage]["train"]
@@ -54,7 +55,7 @@ def create_dataloaders(
             batch_sampler=TokenSampler(
                 ds_tokenized[split], train_config["minibatch_token_size"], config["seed"]
             ),
-            collate_fn=partial(collate_batch, pad_token_id=config["tokenizer"]["pad_token_id"]),
+            collate_fn=partial(collate_batch, pad_token_id=tokenizer.pad_token_id),
             pin_memory=True,
             num_workers=train_config.get("num_workers", 0) if is_train else 0,
             persistent_workers=is_train and train_config.get("num_workers", 0) > 0,

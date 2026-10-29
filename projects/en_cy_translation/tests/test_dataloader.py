@@ -6,9 +6,9 @@ from src import dataloader
 from src.train import STAGE
 
 
-def test_batches_fit_the_padded_token_budget(ds_tokenized, config):
+def test_batches_fit_the_padded_token_budget(ds_tokenized, tok, config):
     budget = config["stages"][STAGE]["train"]["minibatch_token_size"]
-    loader = dataloader.create_dataloaders(ds_tokenized, config, STAGE)["train"]
+    loader = dataloader.create_dataloaders(ds_tokenized, tok, config, STAGE)["train"]
 
     for batch in itertools.islice(loader, 20):
         rows = batch["src_input_ids"].shape[0]
@@ -52,8 +52,8 @@ def test_make_collate_fn(ds_tokenized):
     assert torch.equal(actual["src_input_ids"], expected["src_input_ids"])
 
 
-def test_create_dataloaders(ds_tokenized, config):
-    loaders = dataloader.create_dataloaders(ds_tokenized, config, STAGE)
+def test_create_dataloaders(ds_tokenized, tok, config):
+    loaders = dataloader.create_dataloaders(ds_tokenized, tok, config, STAGE)
     assert set(loaders) == {"train", "test"}
     batch = next(iter(loaders["train"]))
     assert (
