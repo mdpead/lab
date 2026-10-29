@@ -66,6 +66,10 @@ Triton kernel need a GPU and run locally.
 
 ## mlcore
 
+[mlcore/README.md](mlcore/README.md) explains how the library is organised: where the line
+between library and project falls, the extension points a project plugs into, the config
+contract, and how each extraction was checked to change nothing.
+
 | Module | Contents |
 |---|---|
 | `mlcore.layers` | Grouped-query and multi-head attention, RoPE and sinusoidal positions, RMSNorm and LayerNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
