@@ -153,6 +153,8 @@ def test_train_stage_resumable_keys():
         "keep_checkpoints",
         "cache_clear_steps",
         "compile_model",
+        "num_workers",
+        "prefetch_factor",
     }
 
 

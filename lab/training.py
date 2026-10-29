@@ -70,6 +70,9 @@ class SupervisedStage(TrainStage):
     """A stage run by `supervised_loop`, which accumulates minibatches up to a token budget."""
 
     effective_batch_token_size: int
+    # DataLoader worker processes for the train split, and the batches each loads ahead
+    num_workers: int = resumable(0)
+    prefetch_factor: int = resumable(2)
 
     def __post_init__(self) -> None:
         if self.effective_batch_token_size < self.minibatch_token_size:

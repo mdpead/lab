@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from lab.config import Component, resumable
+from lab.config import Component
 from lab.models import MODELS, decoder_only
 from lab.runs import RunConfig
 from lab.tokenizer import TOKENIZERS
@@ -18,8 +18,6 @@ class LMTrain(SupervisedStage):
     """Pretraining and SFT: the supervised loop with the MoE load-balancing loss."""
 
     router_aux_loss_coef: float
-    num_workers: int = resumable(0)
-    prefetch_factor: int = resumable(2)
 
 
 @dataclass(frozen=True, kw_only=True)

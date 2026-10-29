@@ -4,6 +4,7 @@ from typing import Any
 
 import datasets as hf_datasets
 import torch
+from lab.data import loader_options, pad, token_budget_loaders
 from lab.data.samplers import InfiniteRandomSampler, Rows, TokenSampler
 from lab.runs import Config
 from torch import Tensor
@@ -48,10 +49,7 @@ def collate_sft_batch(batch: list[dict[str, Any]], pad_token_id: int) -> dict[st
 
     Masked positions are overwritten in output_ids only, so the model still reads them.
     """
-    max_len = max(len(row["ids"]) for row in batch)
-    ids = torch.full((len(batch), max_len), pad_token_id, dtype=torch.long)
-    for i, row in enumerate(batch):
-        ids[i, : len(row["ids"])] = torch.tensor(row["ids"], dtype=torch.long)
+    ids, padding_mask = pad([row["ids"] for row in batch], pad_token_id)
 
     input_ids = ids[:, :-1]
     # Cloned, so masking the targets below does not blank the input as well
@@ -65,7 +63,7 @@ def collate_sft_batch(batch: list[dict[str, Any]], pad_token_id: int) -> dict[st
 
     return {
         "input_ids": input_ids,
-        "padding_mask": input_ids != pad_token_id,
+        "padding_mask": padding_mask[:, :-1],
         "output_ids": output_ids,
     }
 
@@ -88,15 +86,10 @@ def create_dataloaders_pretrain(
 ) -> dict[str, DataLoader]:
 
     train_config = config["stages"]["pretrain"]["train"]
-    num_workers = train_config.get("num_workers", 0)
-    prefetch_factor = train_config.get("prefetch_factor", 2) if num_workers > 0 else None
+    batch_size = train_config["minibatch_token_size"] // config["model"]["max_length"]
 
     dataloaders = {}
     for split in ds:
-        split_num_workers = 0 if split == "test" else num_workers
-        split_prefetch_factor = None if split_num_workers == 0 else prefetch_factor
-
-        batch_size = train_config["minibatch_token_size"] // config["model"]["max_length"]
         # batch_size lets the sampler convert a minibatch count into a row offset on resume
         sampler = (
             InfiniteRandomSampler(ds[split], config["seed"], batch_size=batch_size)
@@ -108,9 +101,7 @@ def create_dataloaders_pretrain(
             batch_size=batch_size,
             sampler=sampler,
             collate_fn=partial(collate_lm_batch, pad_token_id=tokenizer.pad_token_id),
-            pin_memory=True,
-            num_workers=split_num_workers,
-            prefetch_factor=split_prefetch_factor,
+            **loader_options(train_config, split),
         )
     return dataloaders
 
@@ -121,25 +112,12 @@ def create_dataloaders_sft(
     config: Config,
 ) -> dict[str, DataLoader]:
 
-    train_config = config["stages"]["sft"]["train"]
-    num_workers = train_config.get("num_workers", 0)
-    prefetch_factor = train_config.get("prefetch_factor", 2) if num_workers > 0 else None
-
-    dataloaders = {}
-    for split in ds:
-        split_num_workers = 0 if split == "test" else num_workers
-        split_prefetch_factor = None if split_num_workers == 0 else prefetch_factor
-
-        sampler = TokenSampler(ds[split], train_config["minibatch_token_size"], config["seed"])
-        dataloaders[split] = DataLoader(
-            ds[split],
-            batch_sampler=sampler,
-            collate_fn=partial(collate_sft_batch, pad_token_id=tokenizer.pad_token_id),
-            pin_memory=True,
-            num_workers=split_num_workers,
-            prefetch_factor=split_prefetch_factor,
-        )
-    return dataloaders
+    return token_budget_loaders(
+        ds,
+        partial(collate_sft_batch, pad_token_id=tokenizer.pad_token_id),
+        config["stages"]["sft"]["train"],
+        config["seed"],
+    )
 
 
 def create_dataloaders_rl(
