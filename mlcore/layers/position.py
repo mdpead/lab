@@ -1,7 +1,12 @@
 import torch
 from torch import Tensor, nn
 
+from mlcore.config import Registry
 
+POSITIONS = Registry("position", provided=("d_model", "d_h", "max_length"))
+
+
+@POSITIONS.register("rope")
 class RotaryPositionalEncoding(nn.Module):
     def __init__(self, d_h: int, max_length: int) -> None:
         super().__init__()
@@ -65,6 +70,7 @@ class RotaryPositionalEncoding(nn.Module):
         return Q_rot, K_rot
 
 
+@POSITIONS.register("sinusoidal")
 class SinusoidalPositionalEncoding(nn.Module):
     """Fixed sin/cos encodings added to the embeddings, as in the original Transformer."""
 

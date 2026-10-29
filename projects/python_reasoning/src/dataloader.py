@@ -87,7 +87,7 @@ def create_dataloaders_pretrain(
     config: Config,
 ) -> dict[str, DataLoader]:
 
-    train_config = config["train"]["pretrain"]
+    train_config = config["stages"]["pretrain"]["train"]
     num_workers = train_config.get("num_workers", 0)
     prefetch_factor = train_config.get("prefetch_factor", 2) if num_workers > 0 else None
 
@@ -121,7 +121,7 @@ def create_dataloaders_sft(
     config: Config,
 ) -> dict[str, DataLoader]:
 
-    train_config = config["train"]["sft"]
+    train_config = config["stages"]["sft"]["train"]
     num_workers = train_config.get("num_workers", 0)
     prefetch_factor = train_config.get("prefetch_factor", 2) if num_workers > 0 else None
 
@@ -152,7 +152,7 @@ def create_dataloaders_rl(
     No workers or pinned memory: rows are plain dicts and generate() does the tokenising.
     `tokenizer` is unused, kept so the create_dataloaders_* functions share a signature.
     """
-    train_config = config["train"]["rl"]
+    train_config = config["stages"]["rl"]["train"]
 
     dataloaders: dict[str, DataLoader] = {}
     for split in ds:

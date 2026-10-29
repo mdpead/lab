@@ -4,7 +4,8 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, NotRequired, TypedDict
+from dataclasses import dataclass
+from typing import Any, Literal, NotRequired, TypedDict
 
 import torch
 from torch import Tensor, amp, nn
@@ -14,7 +15,68 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from mlcore import runs
+from mlcore.config import resumable
 from mlcore.data.samplers import resume_at_minibatch
+
+
+@dataclass(frozen=True, kw_only=True)
+class TrainStage:
+    """The `train.<stage>` settings mlcore reads, for any kind of stage.
+
+    Defaults match what the code assumes when a key is left out. Fields marked `resumable()`
+    can change without clearing the stage's checkpoints. A project subclasses this to add its
+    own settings.
+    """
+
+    device: str
+    learning_rate: float
+    adam_betas: tuple[float, float]
+    adam_eps: float
+    warm_up_steps: int
+    minibatch_token_size: int = resumable()
+    num_steps: int = resumable()
+    checkpoint_steps: int = resumable()
+    validation_steps: int = resumable()
+    validation_batches: int = resumable()
+    lr_schedule: Literal["inverse_sqrt", "constant"] = "inverse_sqrt"
+    label_smoothing: float = 0.0
+    keep_checkpoints: int | None = resumable(None)
+    cache_clear_steps: int | None = resumable(None)
+    compile_model: bool = resumable(False)
+
+
+@dataclass(frozen=True, kw_only=True)
+class InitFrom:
+    """Which earlier stage's weights a stage starts from, the first time it runs."""
+
+    stage: str
+    # The checkpoint to take. Left out, the latest is taken, and the run's ancestry is not
+    # recorded in its config.
+    step: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class StageConfig:
+    """One entry under `stages`: how the stage trains, the data it trains on, and where it
+    starts. A project subclasses it, narrowing `train` and `data` to its own classes."""
+
+    train: TrainStage
+    data: Any = None
+    init_from: InitFrom | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class SupervisedStage(TrainStage):
+    """A stage run by `supervised_loop`, which accumulates minibatches up to a token budget."""
+
+    effective_batch_token_size: int
+
+    def __post_init__(self) -> None:
+        if self.effective_batch_token_size < self.minibatch_token_size:
+            raise ValueError(
+                f"effective_batch_token_size ({self.effective_batch_token_size}) must be at "
+                f"least minibatch_token_size ({self.minibatch_token_size})"
+            )
 
 
 class Run(TypedDict):
@@ -274,12 +336,12 @@ def load_model_weights(
     if step is None:
         step = steps[-1]
         logging.warning(
-            f"init_from_step not set; taking the latest checkpoint ({step}) from {from_path}. "
+            f"init_from.step not set; taking the latest checkpoint ({step}) from {from_path}. "
             "Pin it in the config so this run's ancestry is recorded."
         )
     elif step not in steps:
         raise FileNotFoundError(
-            f"init_from_step {step} not found in {from_path}/checkpoints (have {steps})."
+            f"init_from.step {step} not found in {from_path}/checkpoints (have {steps})."
         )
 
     model.to(device)
@@ -295,7 +357,10 @@ def get_run(
     train_config: dict[str, Any],
     tokenizer: PreTrainedTokenizerFast,
     init_from: str | None = None,
+    init_from_step: int | None = None,
 ) -> Run:
+    """The stage's training state: resumed from its own latest checkpoint if it has one,
+    otherwise fresh, with weights from `init_from`'s checkpoint `init_from_step` if given."""
     if checkpoint_steps_on_disk(f"{run_path}/checkpoints"):
         # A stage with its own history resumes from it and ignores init_from
         run = load_run(run_path, model, train_config, tokenizer)
@@ -305,7 +370,7 @@ def get_run(
                 model,
                 init_from,
                 torch.device(train_config["device"]),
-                train_config.get("init_from_step"),
+                init_from_step,
             )
         run = create_run(model, train_config, tokenizer)
 
@@ -391,7 +456,7 @@ def supervised_loop(
     batch field whose non-pad tokens are counted for throughput.
     """
 
-    train_config = config["train"][stage]
+    train_config = config["stages"][stage]["train"]
     device = torch.device(train_config["device"])
     grad_accum_steps = (
         train_config["effective_batch_token_size"] // train_config["minibatch_token_size"]
@@ -507,19 +572,25 @@ def train(
     dataloaders: dict[str, DataLoader],
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,
-    init_from: str | None = None,
     *,
     loop: TrainLoop,
 ) -> None:
-    """Run a stage. `init_from` is another stage's directory, whose weights seed the first run.
+    """Run a stage. The first time it runs, `stages.<stage>.init_from` names the earlier stage
+    whose weights it starts from, if any.
 
     `loop` is the stage's training loop, supplied by the project, so stages share the
     resume and already-complete handling here.
     """
 
-    train_config = config["train"][stage]
+    stage_config = config["stages"][stage]
+    if stage_config.get("train") is None:
+        raise ValueError(f"stages.{stage} has no train section, so it cannot be trained")
+    train_config = stage_config["train"]
     run_path = runs.get_stage_path(config, stage)
-    run = get_run(run_path, model, train_config, tokenizer, init_from)
+    source = stage_config.get("init_from")
+    init_from = None if source is None else runs.get_stage_path(config, source["stage"])
+    init_from_step = None if source is None else source.get("step")
+    run = get_run(run_path, model, train_config, tokenizer, init_from, init_from_step)
 
     if run["step_no"] >= train_config["num_steps"]:
         logging.info("Training already complete.")

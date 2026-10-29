@@ -3,6 +3,7 @@ import logging
 from mlcore import runs
 
 from src import data, tokenizer
+from src.config import Config
 
 
 # Train the BPE tokenizer on the pretrain corpus. Later stages load it from the run
@@ -11,7 +12,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    config = runs.parse_config()
+    config = runs.parse_config(Config)
     run_path = runs.init_run_dir(config)
 
     ds_raw = data.get_dataset_pretrain(config)

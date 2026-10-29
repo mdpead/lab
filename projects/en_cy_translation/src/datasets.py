@@ -27,10 +27,14 @@ LOADERS: dict[str, Callable[[dict[str, Any], int], Any]] = {
 }
 
 
-def get_dataset(key: str, config: dict[str, Any]) -> Any:
-    ds_config = config["data"][key]
+def load_dataset(ds_config: dict[str, Any], seed: int) -> Any:
     name = ds_config["ds"]
     loader = LOADERS.get(name)
     if loader is None:
         raise ValueError(f"Unknown dataset: {name}")
-    return loader(ds_config, config["seed"])
+    return loader(ds_config, seed)
+
+
+def get_dataset(stage: str, config: dict[str, Any]) -> Any:
+    """The dataset a stage trains on, from `stages.<stage>.data`."""
+    return load_dataset(config["stages"][stage]["data"], config["seed"])

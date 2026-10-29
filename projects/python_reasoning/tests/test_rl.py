@@ -81,7 +81,7 @@ def _run(
         "temperature": temperature,
         **overrides,
     }
-    config = {"seed": 0, "model": {"max_length": 64}, "train": {"rl": train_config}}
+    config = {"seed": 0, "model": {"max_length": 64}, "stages": {"rl": {"train": train_config}}}
 
     rows = [
         {
@@ -266,7 +266,7 @@ def test_sampled_validation_is_reproducible_and_leaves_training_rng(
         }
         for p in PROMPTS
     ]
-    config = {"seed": 0, "train": {"rl": {"generation_prompts_size": 2}}}
+    config = {"seed": 0, "stages": {"rl": {"train": {"generation_prompts_size": 2}}}}
     loader = create_dataloaders_rl({"test": rows}, tokenizer, config)["test"]
 
     def validate():

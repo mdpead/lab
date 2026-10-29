@@ -72,8 +72,9 @@ contract, and how each extraction was checked to change nothing.
 
 | Module | Contents |
 |---|---|
+| `mlcore.config` | Typed configs checked when they load, with registries of swappable components |
 | `mlcore.layers` | Grouped-query and multi-head attention, RoPE and sinusoidal positions, RMSNorm and LayerNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
-| `mlcore.models` | `decoder_only` and `encoder_decoder` Transformers, each with a `build_transformer` |
+| `mlcore.models` | `decoder_only` and `encoder_decoder` Transformers, assembled from the components a config names; `build_model` |
 | `mlcore.kernels` | Triton flash attention, plus reference add and matmul kernels |
 | `mlcore.generation` | Batched greedy and sampled decoding with a KV cache |
 | `mlcore.training` | `supervised_loop`, which a project gives its loss; checkpoints, resume, stage seeding, LR schedules |

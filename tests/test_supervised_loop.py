@@ -21,19 +21,21 @@ def _config(tmp_path, num_steps=3):
         "name": "t",
         "seed": 0,
         "locations": {"models_dir": str(tmp_path)},
-        "train": {
+        "stages": {
             STAGE: {
-                "device": "cpu",
-                "learning_rate": 1e-3,
-                "adam_betas": [0.9, 0.98],
-                "adam_eps": 1e-9,
-                "warm_up_steps": 2,
-                "effective_batch_token_size": 40,
-                "minibatch_token_size": 20,
-                "num_steps": num_steps,
-                "checkpoint_steps": 2,
-                "validation_steps": 2,
-                "validation_batches": 1,
+                "train": {
+                    "device": "cpu",
+                    "learning_rate": 1e-3,
+                    "adam_betas": [0.9, 0.98],
+                    "adam_eps": 1e-9,
+                    "warm_up_steps": 2,
+                    "effective_batch_token_size": 40,
+                    "minibatch_token_size": 20,
+                    "num_steps": num_steps,
+                    "checkpoint_steps": 2,
+                    "validation_steps": 2,
+                    "validation_batches": 1,
+                }
             }
         },
     }
@@ -63,7 +65,7 @@ def _compute_loss(model, batch, criterion):
 def _train(tmp_path, tokenizer, num_steps=3, validation_metrics=None):
     config = _config(tmp_path, num_steps)
     model = nn.Sequential(nn.Embedding(16, 8), nn.Linear(8, 16))
-    run = training.create_run(model, config["train"][STAGE], tokenizer)
+    run = training.create_run(model, config["stages"][STAGE]["train"], tokenizer)
     run["run_path"] = runs.get_stage_path(config, STAGE)
     training.supervised_loop(
         STAGE,

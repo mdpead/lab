@@ -50,13 +50,15 @@ def config():
     return {
         "seed": 0,
         "model": {"max_length": MAX_LENGTH},
-        "train": {
+        "stages": {
             "pretrain": {
-                "minibatch_token_size": MINIBATCH_TOKENS,
-                "num_workers": 2,
-                "prefetch_factor": 2,
+                "train": {
+                    "minibatch_token_size": MINIBATCH_TOKENS,
+                    "num_workers": 2,
+                    "prefetch_factor": 2,
+                }
             },
-            "rl": {"generation_prompts_size": PROMPTS_PER_STEP},
+            "rl": {"train": {"generation_prompts_size": PROMPTS_PER_STEP}},
         },
     }
 
@@ -133,7 +135,7 @@ def test_test_split_runs_in_process(splits, tokenizer, config):
 
 def test_prefetch_factor_is_dropped_when_workers_are_disabled(splits, tokenizer, config):
     """DataLoader rejects a prefetch_factor alongside num_workers=0."""
-    config["train"]["pretrain"]["num_workers"] = 0
+    config["stages"]["pretrain"]["train"]["num_workers"] = 0
     dls = create_dataloaders_pretrain(splits, tokenizer, config)
     for dl in dls.values():
         assert dl.num_workers == 0
@@ -141,7 +143,7 @@ def test_prefetch_factor_is_dropped_when_workers_are_disabled(splits, tokenizer,
 
 
 def test_batches_have_the_shape_the_model_expects(splits, tokenizer, config):
-    config["train"]["pretrain"]["num_workers"] = 0  # keep the test in-process
+    config["stages"]["pretrain"]["train"]["num_workers"] = 0  # keep the test in-process
     dls = create_dataloaders_pretrain(splits, tokenizer, config)
     batch_size = MINIBATCH_TOKENS // MAX_LENGTH
 
@@ -157,7 +159,7 @@ def test_batches_have_the_shape_the_model_expects(splits, tokenizer, config):
 
 
 def test_test_loader_covers_the_split_once(splits, tokenizer, config):
-    config["train"]["pretrain"]["num_workers"] = 0
+    config["stages"]["pretrain"]["train"]["num_workers"] = 0
     dls = create_dataloaders_pretrain(splits, tokenizer, config)
     batch_size = MINIBATCH_TOKENS // MAX_LENGTH
 
@@ -271,11 +273,13 @@ def sft_config():
     return {
         "seed": 0,
         "model": {"max_length": MAX_LENGTH},
-        "train": {
+        "stages": {
             "sft": {
-                "minibatch_token_size": MINIBATCH_TOKENS,
-                "num_workers": 2,
-                "prefetch_factor": 2,
+                "train": {
+                    "minibatch_token_size": MINIBATCH_TOKENS,
+                    "num_workers": 2,
+                    "prefetch_factor": 2,
+                }
             }
         },
     }
@@ -314,7 +318,7 @@ def test_sft_loader_reports_no_length(sft_splits, tokenizer, sft_config):
 
 
 def test_sft_batches_have_the_shape_the_model_expects(sft_splits, tokenizer, sft_config):
-    sft_config["train"]["sft"]["num_workers"] = 0  # keep the test in-process
+    sft_config["stages"]["sft"]["train"]["num_workers"] = 0  # keep the test in-process
     dls = create_dataloaders_sft(sft_splits, tokenizer, sft_config)
     pad = tokenizer.pad_token_id
 

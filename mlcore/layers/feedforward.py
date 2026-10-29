@@ -2,7 +2,12 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from mlcore.config import Registry
 
+FEEDFORWARDS = Registry("feedforward", provided=("d_model",))
+
+
+@FEEDFORWARDS.register("relu")
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, d_model: int, d_ff: int, bias: bool = False) -> None:
         super().__init__()
@@ -17,6 +22,7 @@ class PositionWiseFeedForward(nn.Module):
         return x
 
 
+@FEEDFORWARDS.register("swiglu")
 class SwiGLUFeedForward(nn.Module):
     def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
@@ -32,11 +38,13 @@ class SwiGLUFeedForward(nn.Module):
         return o
 
 
+@FEEDFORWARDS.register("moe")
 class MixtureOfExpertsFeedForward(nn.Module):
     def __init__(
         self, d_model: int, d_ff: int, num_experts: int, top_k: int, capacity_factor: float
     ) -> None:
         super().__init__()
+        self.check_config(num_experts=num_experts, top_k=top_k)
         self.num_experts = num_experts
         self.top_k = top_k
         # Rows per expert, as a multiple of its balanced share. Above 1.0 absorbs router
@@ -46,6 +54,11 @@ class MixtureOfExpertsFeedForward(nn.Module):
         self.experts = nn.ModuleList(
             [SwiGLUFeedForward(d_model, d_ff) for _ in range(0, num_experts)]
         )
+
+    @staticmethod
+    def check_config(num_experts: int, top_k: int, **_: object) -> None:
+        if not 1 <= top_k <= num_experts:
+            raise ValueError(f"top_k ({top_k}) must be between 1 and num_experts ({num_experts})")
 
     def forward(self, x: Tensor, padding_mask: Tensor | None = None) -> tuple[Tensor, Tensor]:
 

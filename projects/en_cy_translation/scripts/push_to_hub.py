@@ -3,14 +3,13 @@ import os
 import shutil
 import sys
 
-import yaml
-
 sys.path.insert(0, ".")
 
 from huggingface_hub import HfApi
 from mlcore import runs
 from mlcore.tokenizer import load_tokenizer
 
+from src.config import Config
 from src.hf_wrapper import EnCyForTranslation
 from src.train import STAGE
 
@@ -19,8 +18,7 @@ parser.add_argument("--config", required=True, help="Config name (e.g. base)")
 parser.add_argument("--repo", required=True, help="HuggingFace repo (e.g. username/en-cy)")
 args = parser.parse_args()
 
-with open(f"configs/{args.config}.yaml") as f:
-    config = yaml.safe_load(f)
+config = runs.load_config_file(f"configs/{args.config}.yaml", Config)
 
 run_path = runs.get_run_path(config)
 stage_path = runs.get_stage_path(config, STAGE)
