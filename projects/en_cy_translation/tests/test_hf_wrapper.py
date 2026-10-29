@@ -5,6 +5,7 @@ import torch
 from mlcore import runs, training
 
 from src import generation
+from src.config import Config
 from src.hf_wrapper import EnCyConfig, EnCyForTranslation
 from src.train import STAGE
 
@@ -139,7 +140,7 @@ def test_generate_accepts_tokenizer_output(config, transformer, tok):
 
 
 def test_from_run_loads_latest_checkpoint(config, transformer, tok):
-    stage_path = runs.init_run(config, STAGE)
+    stage_path = runs.init_run(config, STAGE, Config)
     run = training.create_run(transformer, config["train"][STAGE], tok)
     args = run["optimiser"], run["lr_scheduler"], run["scaler"], stage_path
     training.save_checkpoint(torch.nn.Linear(1, 1), *args, 1, [])
@@ -154,6 +155,6 @@ def test_from_run_loads_latest_checkpoint(config, transformer, tok):
 
 
 def test_from_run_without_checkpoints_raises(config):
-    stage_path = runs.init_run(config, STAGE)
+    stage_path = runs.init_run(config, STAGE, Config)
     with pytest.raises(FileNotFoundError):
         EnCyForTranslation.from_run(stage_path)

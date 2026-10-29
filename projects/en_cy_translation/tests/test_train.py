@@ -6,6 +6,7 @@ import torch
 from mlcore import runs, training
 
 from src import dataloader, train
+from src.config import Config
 from src.train import STAGE
 
 
@@ -22,7 +23,7 @@ def test_generate_metrics_perfect_and_wrong(monkeypatch, tok):
 
 
 def run_training(config, transformer, ds_tokenized, tok):
-    runs.init_run(config, STAGE)
+    runs.init_run(config, STAGE, Config)
     loaders = dataloader.create_dataloaders(ds_tokenized, config, STAGE)
     train.train(transformer, loaders, tok, config)
     return runs.get_stage_path(config, STAGE)

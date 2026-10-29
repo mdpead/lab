@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
 
@@ -176,6 +178,26 @@ def init_weights(m: nn.Module) -> None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, (nn.Embedding, Embedding)):
         nn.init.normal_(m.E, mean=0.0, std=0.02)
+
+
+@dataclass(frozen=True, kw_only=True)
+class ModelConfig:
+    """The `model` section that build_transformer reads for the decoder-only Transformer.
+
+    The vocabulary size comes from `tokenizer.vocab_size`.
+    """
+
+    d_model: int
+    num_heads: int
+    num_kv_heads: int
+    d_h: int
+    d_ff: int
+    num_experts: int
+    top_k: int
+    capacity_factor: float
+    num_layers: int
+    max_length: int
+    dropout: float
 
 
 def build_transformer(config: Config) -> Transformer:

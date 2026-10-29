@@ -9,6 +9,7 @@ from mlcore import runs, tokenizer
 from mlcore.models import decoder_only
 
 from src import data, dataloader, train
+from src.config import Config
 
 
 # Supervised fine-tuning on synth tasks: prompt in, trace and answer out, loss on the completion
@@ -16,8 +17,8 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    config = runs.parse_config()
-    runs.init_run(config, "sft")
+    config = runs.parse_config(Config)
+    runs.init_run(config, "sft", Config)
 
     # scripts/tokenizer.py trained the tokenizer; this only loads it
     token = tokenizer.load_tokenizer(runs.get_run_path(config))

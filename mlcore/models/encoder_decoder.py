@@ -4,6 +4,8 @@ Attribute names are part of the saved weights, published models included: renami
 breaks loading them.
 """
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
 
@@ -185,6 +187,22 @@ def init_weights(m: nn.Module) -> None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, (nn.Embedding, Embedding)):
         nn.init.normal_(m.E, mean=0.0, std=0.02)
+
+
+@dataclass(frozen=True, kw_only=True)
+class ModelConfig:
+    """The `model` section that build_transformer reads for the encoder-decoder Transformer.
+
+    The vocabulary size comes from `tokenizer.vocab_size`.
+    """
+
+    d_model: int
+    num_heads: int
+    d_ff: int
+    num_enc_layers: int
+    num_dec_layers: int
+    max_length: int
+    dropout: float
 
 
 def build_transformer(config: Config) -> Transformer:

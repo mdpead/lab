@@ -4,7 +4,8 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, NotRequired, TypedDict
+from dataclasses import dataclass
+from typing import Any, Literal, NotRequired, TypedDict
 
 import torch
 from torch import Tensor, amp, nn
@@ -14,7 +15,49 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from mlcore import runs
+from mlcore.config import resumable
 from mlcore.data.samplers import resume_at_minibatch
+
+
+@dataclass(frozen=True, kw_only=True)
+class TrainStage:
+    """The `train.<stage>` settings mlcore reads, for any kind of stage.
+
+    Defaults match what the code assumes when a key is left out. Fields marked `resumable()`
+    can change without clearing the stage's checkpoints. A project subclasses this to add its
+    own settings.
+    """
+
+    device: str
+    learning_rate: float
+    adam_betas: tuple[float, float]
+    adam_eps: float
+    warm_up_steps: int
+    minibatch_token_size: int = resumable()
+    num_steps: int = resumable()
+    checkpoint_steps: int = resumable()
+    validation_steps: int = resumable()
+    validation_batches: int = resumable()
+    lr_schedule: Literal["inverse_sqrt", "constant"] = "inverse_sqrt"
+    label_smoothing: float = 0.0
+    keep_checkpoints: int | None = resumable(None)
+    cache_clear_steps: int | None = resumable(None)
+    compile_model: bool = resumable(False)
+    init_from_step: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class SupervisedStage(TrainStage):
+    """A stage run by `supervised_loop`, which accumulates minibatches up to a token budget."""
+
+    effective_batch_token_size: int
+
+    def __post_init__(self) -> None:
+        if self.effective_batch_token_size < self.minibatch_token_size:
+            raise ValueError(
+                f"effective_batch_token_size ({self.effective_batch_token_size}) must be at "
+                f"least minibatch_token_size ({self.minibatch_token_size})"
+            )
 
 
 class Run(TypedDict):

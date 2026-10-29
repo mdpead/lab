@@ -9,6 +9,7 @@ from mlcore import runs, tokenizer
 from mlcore.models import decoder_only
 
 from src import data, dataloader, rl
+from src.config import Config
 
 
 # RL on synth tasks: sample rollouts, score by executing them, update on GRPO advantages.
@@ -17,8 +18,8 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    config = runs.parse_config()
-    runs.init_run(config, "rl")
+    config = runs.parse_config(Config)
+    runs.init_run(config, "rl", Config)
 
     token = tokenizer.load_tokenizer(runs.get_run_path(config))
 
