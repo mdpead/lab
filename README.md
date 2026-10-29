@@ -39,7 +39,7 @@ pytest                       # tests that build a model or call a Triton kernel 
 | `mlcore.models.encoder_decoder` | The post-norm encoder-decoder Transformer and `build_transformer` |
 | `mlcore.kernels` | Triton flash attention (forward and backward), plus reference add and matmul kernels |
 | `mlcore.generation` | Batched greedy and sampled decoding with a KV cache |
-| `mlcore.training` | Checkpoints, exact resume, seeding a stage from another, LR schedules, `train()` around a project's loop |
+| `mlcore.training` | Checkpoints, exact resume, seeding a stage from another, LR schedules, `train()` around a project's loop, and `supervised_loop`, a shared loop the project gives its loss |
 | `mlcore.data.samplers` | Resumable infinite and token-budget samplers |
 | `mlcore.runs` | Run and stage directories, config fingerprints that clear stale stages, logging |
 | `mlcore.tokenizer` | Saving, loading and caching a trained tokenizer |
