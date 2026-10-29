@@ -1,14 +1,16 @@
 import os
 
+from lab import tokenizer as tokenizer_utils
+
 from src import tokenizer
 from src.hf_wrapper import EnCyConfig
 
 
-def test_special_token_ids_match_model_config(tok, config):
+def test_special_token_ids_match_model_config(tok):
     hf_config = EnCyConfig()
     assert tok.bos_token_id == hf_config.bos_token_id == hf_config.decoder_start_token_id
     assert tok.eos_token_id == hf_config.eos_token_id
-    assert tok.pad_token_id == hf_config.pad_token_id == config["tokenizer"]["pad_token_id"]
+    assert tok.pad_token_id == hf_config.pad_token_id
 
 
 def test_encoding_is_wrapped_in_bos_and_eos(tok):
@@ -46,6 +48,6 @@ def test_get_tokenizer_saves_then_reuses(raw_ds, config, monkeypatch):
     def fail(*args, **kwargs):
         raise AssertionError("tokenizer should be loaded, not retrained")
 
-    monkeypatch.setattr(tokenizer, "create_tokenizer", fail)
+    monkeypatch.setattr(tokenizer_utils, "train_tokenizer", fail)
     second = tokenizer.get_tokenizer(raw_ds, config)
     assert second.get_vocab() == first.get_vocab()

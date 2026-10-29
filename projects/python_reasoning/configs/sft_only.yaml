@@ -98,9 +98,16 @@ stages:
       sample_size: 60000
 
 tokenizer:
+  type: bpe
   vocab_size: 32000
   training_size: 50000
   digit_split: true
+  special_tokens:
+    - "<|think|>"
+    - "<|/think|>"
+    - "<|answer|>"
+    - "<|/answer|>"
+  reserved_tokens: 16
 
 locations:
   data_dir: ./data

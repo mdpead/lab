@@ -159,7 +159,7 @@ src/
   synth.py        Function generator, tracer, and answer checkers
   data.py         Datasets for each stage and their train/test splits
   dataloader.py   Prompt-count sampler, collation, and each stage's loaders
-  tokenizer.py    Byte-level BPE with digit splitting and reasoning markers
+  tokenizer.py    The text the BPE tokenizer trains on (settings in the config)
   train.py        Pretrain/SFT loop and validation
   rl.py           GRPO loop and RL validation
 docs/           Results, model and kernel, RL loop, lessons learned
@@ -177,7 +177,7 @@ lab/
   training.py           Checkpoints, resume, stage seeding, LR schedules
   data/samplers.py      Resumable infinite and token-budget samplers
   runs.py               Run and stage directories, config fingerprints, logging
-  tokenizer.py          Saving, loading and caching a trained tokenizer
+  tokenizer.py          WordPiece and byte-level BPE, trained, saved and loaded
 ```
 
 ## Limitations and next steps

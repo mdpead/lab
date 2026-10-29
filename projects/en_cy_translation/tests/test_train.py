@@ -24,7 +24,7 @@ def test_generate_metrics_perfect_and_wrong(monkeypatch, tok):
 
 def run_training(config, transformer, ds_tokenized, tok):
     runs.init_run(config, STAGE, Config)
-    loaders = dataloader.create_dataloaders(ds_tokenized, config, STAGE)
+    loaders = dataloader.create_dataloaders(ds_tokenized, tok, config, STAGE)
     train.train(transformer, loaders, tok, config)
     return runs.get_stage_path(config, STAGE)
 

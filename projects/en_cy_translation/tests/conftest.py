@@ -3,6 +3,7 @@ import copy
 import pytest
 import torch
 from lab.models import build_model
+from lab.tokenizer import train_tokenizer
 
 from datasets import Dataset, DatasetDict
 from src import tokenizer
@@ -54,7 +55,12 @@ BASE_CONFIG = {
             "data": {"ds": "techiaith/cardiff-university-tm-en-cy", "test_split_ratio": 0.25},
         },
     },
-    "tokenizer": {"vocab_size": 200, "pad_token_id": 2, "training_size": 1000},
+    "tokenizer": {
+        "type": "wordpiece",
+        "vocab_size": 200,
+        "training_size": 1000,
+        "strip_accents": True,
+    },
     "locations": {"data_dir": "./data", "models_dir": "./models"},
 }
 
@@ -79,12 +85,8 @@ def raw_ds():
 
 @pytest.fixture(scope="session")
 def tok():
-    ds = DatasetDict(
-        train=Dataset.from_dict(
-            {"text_en": [en for en, _ in PAIRS], "text_cy": [cy for _, cy in PAIRS]}
-        )
-    )
-    return tokenizer.create_tokenizer(ds, BASE_CONFIG["tokenizer"])
+    texts = [en for en, _ in PAIRS] + [cy for _, cy in PAIRS]
+    return train_tokenizer(BASE_CONFIG["tokenizer"], iter(texts))
 
 
 @pytest.fixture

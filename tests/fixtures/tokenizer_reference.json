@@ -1,0 +1,51 @@
+{
+ "_about": "Tokenizers trained by the code before tokenizers moved into the lab package, on the corpora in tests/test_tokenizer_reference.py. BPE training is deterministic, so the whole serialized tokenizer is hashed. WordPiece training breaks ties in a random order, so only what the code constructs is hashed: the serialized tokenizer without its learned vocabulary.",
+ "bpe": {
+  "digit_split_False": {
+   "example_ids": [0, 3, 43, 47, 3, 58, 66, 60, 3, 3, 54, 70, 54, 66, 49, 64, 54, 54, 78, 159, 135, 103, 24, 63, 72, 1],
+   "sha256": "57ad65aa9c920f1e8fd9e79c0537daf0a39a626c560a2a27f25af93ee78af983",
+   "special": {
+    "bos": ["<bos>", 0],
+    "eos": ["<eos>", 1],
+    "mask": [null, null],
+    "pad": ["<pad>", 2],
+    "unk": ["<unk>", 3]
+   },
+   "vocab_size": 164
+  },
+  "digit_split_True": {
+   "example_ids": [0, 3, 43, 47, 3, 58, 66, 60, 3, 3, 54, 70, 54, 66, 49, 64, 54, 54, 77, 66, 31, 32, 33, 34, 35, 125, 101, 24, 63, 72, 1],
+   "sha256": "f23444e435f9c0b4ff52a95c57445f71e1564e92050ce7b8a1863031886d78d8",
+   "special": {
+    "bos": ["<bos>", 0],
+    "eos": ["<eos>", 1],
+    "mask": [null, null],
+    "pad": ["<pad>", 2],
+    "unk": ["<unk>", 3]
+   },
+   "vocab_size": 145
+  }
+ },
+ "wordpiece": {
+  "training_size_100": {
+   "special": {
+    "bos": ["[BOS]", 0],
+    "eos": ["[EOS]", 1],
+    "mask": ["[MASK]", 3],
+    "pad": ["[PAD]", 2],
+    "unk": ["[UNK]", 4]
+   },
+   "structure_sha256": "6b325fe96e1ab32fdb55ae9576ea8dda7646e17eebb5bea079f2f553d39775da"
+  },
+  "training_size_None": {
+   "special": {
+    "bos": ["[BOS]", 0],
+    "eos": ["[EOS]", 1],
+    "mask": ["[MASK]", 3],
+    "pad": ["[PAD]", 2],
+    "unk": ["[UNK]", 4]
+   },
+   "structure_sha256": "6b325fe96e1ab32fdb55ae9576ea8dda7646e17eebb5bea079f2f553d39775da"
+  }
+ }
+}

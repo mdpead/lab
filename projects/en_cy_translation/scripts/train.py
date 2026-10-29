@@ -21,7 +21,7 @@ def main() -> None:
 
     ds_tokenized = tokenizer.tokenize_dataset(ds_raw, token, config)
 
-    dataloaders = dataloader.create_dataloaders(ds_tokenized, config, train.STAGE)
+    dataloaders = dataloader.create_dataloaders(ds_tokenized, token, config, train.STAGE)
 
     transformer = build_model(config)
 

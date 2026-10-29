@@ -109,9 +109,20 @@ stages:
       test_split_ratio: 0.1
 
 tokenizer:
+  type: bpe
   vocab_size: 16000
+  # Source files used to train BPE, not the training corpus size
   training_size: 1000
-  digit_split: true      # every digit its own token, so arithmetic is compositional
+  # Every digit its own token, so arithmetic is compositional
+  digit_split: true
+  # Reasoning and answer delimiters, pipe-guarded so they can't collide with Python reprs
+  special_tokens:
+    - "<|think|>"
+    - "<|/think|>"
+    - "<|answer|>"
+    - "<|/answer|>"
+  # Spare slots: the vocabulary is fixed once pretraining starts
+  reserved_tokens: 16
 
 locations:
   data_dir: ./data
