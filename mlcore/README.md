@@ -1,16 +1,17 @@
 # mlcore
 
-The library the projects in this repo build on: model layers, Triton kernels, generation, and
-the training infrastructure around a project's own loss. This page explains how it is
-organised and why: where the line between library and project falls, how a project plugs in,
-and how each extraction was checked to change nothing.
+The library the projects in this repo build on: model layers, Triton kernels, generation, typed
+configs, and the training infrastructure around a project's own loss. This page explains how
+it is organised and why: where the line between library and project falls, how a project
+plugs in, and how each change was checked to leave results unchanged.
 
 ## Who uses what
 
 | | `en_cy_translation` | `python_reasoning` |
 |---|---|---|
-| `models` | `encoder_decoder` | `decoder_only` |
+| `models` | `encoder_decoder`, built by `build_model` | `decoder_only`, built by `build_model` |
 | `layers`, `kernels` | through its model | through its model, including Triton flash attention |
+| `config` | its schema, built on `RunConfig`, `StageConfig` and `SupervisedStage` | its schema, built on the same, plus `TrainStage` for RL |
 | `training` | `train`, `supervised_loop` | `train`, `supervised_loop` for pretraining and SFT; `train` with its own RL loop |
 | `data.samplers` | `TokenSampler` | `InfiniteRandomSampler`, `TokenSampler` |
 | `generation` | | KV-cache decoding, for evaluation and RL rollouts |
@@ -20,9 +21,13 @@ and how each extraction was checked to change nothing.
 
 **The library owns mechanics; the project owns meaning.** The library runs the parts that are
 the same whatever the task: gradient accumulation, mixed precision, clipping, the validation
-and checkpoint schedule, exact resume, and run directories. The project decides what a batch
-contains, what the loss is, what counts as a good result, and how its data and tokenizer are
-built.
+and checkpoint schedule, exact resume, run directories, and checking configs. The project
+decides what a batch contains, what the loss is, what counts as a good result, and how its
+data and tokenizer are built.
+
+The config follows the same line. `mlcore` declares the settings it reads, and a project's
+schema subclasses those classes to add its own, so every key in a config file belongs to
+exactly one class.
 
 **Code moves in when a second project needs it, not before.** Nothing was designed in advance.
 `mlcore` began as the parts of `python_reasoning` that `en_cy_translation` duplicated, and each
@@ -34,22 +39,26 @@ later move followed the same rule:
 | Encoder-decoder decoding (`en_cy_translation/src/generation.py`, greedy, for BLEU during training; beam search comes from its Hugging Face wrapper) | One user. `mlcore.generation` is the decoder-only KV-cache path the reasoning project needs. |
 | Batch collation, data preparation, tokenizer training | Task-specific by nature: they decide what a batch means. |
 | BLEU, execution-checked answers | The task's definition of success, passed to the library as a callback. |
+| Data and task settings in the config | Only the project reads them, so only its schema declares them. |
 
-**Moves change nothing.** Each extraction was a move, verified to leave results unchanged,
-before any redesign. Interface changes are kept small and stated explicitly; see
-[How each move was checked](#how-each-move-was-checked).
+**Changes are checked to change nothing.** Each move was verified to leave results unchanged
+before any redesign, and interface changes are kept small and stated; see
+[How each change was checked](#how-each-change-was-checked).
 
 ## Extension points
 
-A project plugs in with plain functions rather than subclasses. There are five:
+A project plugs in with plain functions, decorated classes and dataclasses rather than by
+subclassing the training code:
 
-| Hook | Signature | Supplied to |
+| Hook | What the project supplies | Used by |
 |---|---|---|
 | `compute_loss` | `(model, batch) -> (loss, values_to_log)` | `training.supervised_loop` |
 | `tokens_key` | the batch field whose non-pad tokens count towards throughput | `training.supervised_loop` |
 | `validation_metrics` | `(model, batch) -> dict[str, float]`, optional | `training.supervised_loop` |
 | `loop` | `(stage, model, dataloaders, tokenizer, run, config) -> None` | `training.train` |
 | `create_tokenizer` | `(datasets, tokenizer_config) -> PreTrainedTokenizerFast` | `tokenizer.get_tokenizer` |
+| A component | an `nn.Module` registered with `@NORMS.register("name")` (or `FEEDFORWARDS`, `ATTENTIONS`, `POSITIONS`); its constructor is its config | `model.*` blocks with that `type` |
+| A schema | frozen dataclasses subclassing `RunConfig`, `StageConfig` and `TrainStage` or `SupervisedStage` | `runs.parse_config`, `runs.init_run` |
 
 The translation project's whole training module is a loss, a BLEU callback and two calls into
 `mlcore`:
@@ -79,6 +88,70 @@ The reasoning project's loss adds the mixture-of-experts load-balancing term and
 parts; everything else is the same. Its RL stage passes its own `loop` to `training.train`
 instead of using `supervised_loop`.
 
+A component is a layer and a decorator. Its config block is checked against its constructor,
+leaving out the arguments the model passes in (`d_model` here):
+
+```python
+NORMS = Registry("norm", provided=("d_model",))
+
+
+@NORMS.register("rms")
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-6) -> None: ...
+```
+
+`norm: {type: rms, eps: 1.0e-6}` then builds `RMSNorm(d_model, eps=1e-6)`. A layer can define
+`check_config(**settings)` for checks across settings, such as grouped-query attention's
+"`num_heads` must be a multiple of `num_kv_heads`", so they fail when the config loads.
+
+## The config
+
+Each project has YAML files in `configs/`, grouped by stage, with model components named:
+
+```yaml
+name: base
+seed: 0
+model:
+  type: decoder_only
+  d_model: 1024
+  num_layers: 16
+  max_length: 1024
+  dropout: 0.0
+  norm: {type: rms}
+  position: {type: rope}
+  attention: {type: gqa, num_heads: 16, num_kv_heads: 4, d_h: 64}
+  feedforward: {type: moe, d_ff: 1408, num_experts: 4, top_k: 2, capacity_factor: 1.25}
+stages:
+  sft:
+    init_from: {stage: pretrain, step: 10000}
+    train: {learning_rate: 3.0e-4, ...}
+    data: {tier: easy, tasks: [output], ...}
+tokenizer: {...}
+locations: {models_dir: ./models}
+```
+
+Every script checks its config against the project's schema before anything runs, and the
+first problem fails with its file and path:
+
+```
+configs/sft_only.yaml: stages.sft.train: unknown key 'num_step'; did you mean 'num_steps'?
+configs/sft_only.yaml: stages.sft.train.learning_rate: expected a number, got str '3e-4' (YAML needs a dot in exponent floats, e.g. 3.0e-4)
+configs/base.yaml: model.feedforward: feedforward type 'moe' is not supported here (one of: relu, swiglu)
+```
+
+| Part | Declared by |
+|---|---|
+| `name`, `seed`, `locations` | `runs.RunConfig` |
+| `model` | the family's `ModelConfig` (`decoder_only`, `encoder_decoder`), chosen by `type`; each component block by its layer's constructor |
+| `stages.<stage>.init_from` | `training.InitFrom`: the earlier stage, and optionally the checkpoint step, a stage's weights start from |
+| `stages.<stage>.train` | `training.TrainStage` (any stage) or `SupervisedStage` (a stage `supervised_loop` runs), with the project's own fields added |
+| `stages.<stage>.data`, `tokenizer` | the project's schema |
+
+**Which changes restart a stage** is declared on the setting. Fields marked `resumable()`, such
+as `num_steps`, `checkpoint_steps` and `compile_model`, can change and the stage resumes;
+anything else in the model, tokenizer, the stage's own section, the name or the seed restarts
+it. Configs are compared after parsing, so writing out a default is the same as leaving it out.
+
 ## A stage's lifecycle
 
 A run has one or more stages (the reasoning project has pretrain, SFT and RL; translation has
@@ -95,39 +168,20 @@ models/<name>/
     checkpoints/<step>.pt
 ```
 
-1. **`runs.init_run(config, stage)`** creates the directories and compares the stage's
-   *fingerprint* with the one saved last time. If they differ, the stage's directory is
-   cleared, so a stale checkpoint is never resumed under a new setting. A changed tokenizer
-   section clears the saved tokenizer the same way.
+1. **`runs.init_run(config, stage, schema)`** creates the directories and compares the stage's
+   fingerprint with the saved config's. If a setting the checkpoints depend on changed, the
+   stage's directory is cleared, so a stale checkpoint is never resumed under a new setting.
+   If the saved config cannot be read against the schema at all, the run stops instead: the
+   checkpoints may be worth keeping. A changed tokenizer section clears the saved tokenizer.
 2. **`training.train(...)`** builds the run state. It resumes from the stage's latest
-   checkpoint if one exists. Otherwise it starts fresh, optionally seeding the weights from
-   another stage's checkpoint (`init_from`, pinned with `init_from_step`), with a fresh
-   optimiser and step counter. If `num_steps` is already reached it returns.
+   checkpoint if one exists. Otherwise it starts fresh, seeding the weights from the stage
+   named in `init_from` if set, with a fresh optimiser and step counter. If `num_steps` is
+   already reached it returns.
 3. **The loop** fast-forwards the sampler to the exact minibatch it stopped at, without reading
    any data, then trains. It checkpoints every `checkpoint_steps` and once more at the end, and
    keeps the newest `keep_checkpoints`.
 
-## The config contract
-
-Projects use YAML configs, which `mlcore` reads as plain dicts. Which keys it reads is not yet
-enforced by a schema (see [Limitations](#limitations-and-next-steps)), so this is the contract:
-
-| Key | Read by |
-|---|---|
-| `name`, `seed`, `locations.models_dir` | `runs`: run directory and seeding |
-| `tokenizer.vocab_size` | both model builders |
-| `model.*` | the model builder: `d_model`, `num_heads`, `d_ff`, `max_length`, `dropout`, plus `num_kv_heads`, `d_h`, `num_experts`, `top_k`, `capacity_factor`, `num_layers` (decoder-only) or `num_enc_layers`, `num_dec_layers` (encoder-decoder) |
-| `train.<stage>.*` | `training`: `device`, `learning_rate`, `adam_betas`, `adam_eps`, `warm_up_steps`, `lr_schedule`, `label_smoothing`, `effective_batch_token_size`, `minibatch_token_size`, `num_steps`, `checkpoint_steps`, `keep_checkpoints`, `validation_steps`, `validation_batches`, `cache_clear_steps`, `compile_model`, `init_from_step` |
-| `data.<stage>` | `runs`, for the fingerprint only |
-
-A stage's **fingerprint** is `name`, `seed`, `model`, `tokenizer`, `data.<stage>`, and
-`train.<stage>` minus the keys that can change mid-run without invalidating a checkpoint:
-`num_steps`, `checkpoint_steps`, `keep_checkpoints`, `validation_steps`, `validation_batches`,
-`minibatch_token_size`, `cache_clear_steps`, `num_workers`, `prefetch_factor`, `compile_model`.
-So raising `num_steps` extends a finished run, while changing the learning rate starts the
-stage again.
-
-## How each move was checked
+## How each change was checked
 
 | Change | Check |
 |---|---|
@@ -135,28 +189,30 @@ stage again.
 | Add the encoder-decoder and move `en_cy_translation` onto `mlcore` and newer dependencies ([#3](https://github.com/mdpead/lab/pull/3)) | Weight names kept, so existing checkpoints and the published model load. The published model's greedy and beam-search translations identical across old and new code and versions, with logits within 1e-5. |
 | Share the supervised loop ([#5](https://github.com/mdpead/lab/pull/5)) | Bitwise-identical `results.json`, apart from timings, before and after: translation on CPU and GPU, reasoning SFT on GPU. |
 | Share the test fixtures ([#7](https://github.com/mdpead/lab/pull/7)) | The same tests collected and passing in all three suites before and after. |
+| Check configs against typed schemas ([#10](https://github.com/mdpead/lab/pull/10)) | Every config file parses; the schema's resumable fields give the same fingerprint as the old hard-coded key list for every stage of every config. |
+| Build models from named components, stage-first configs ([#11](https://github.com/mdpead/lab/pull/11)) | Against fixtures recorded from the old code: identical seeded weights for both families, identical parameter names, shapes and counts for every config, and bitwise-identical encoder-decoder outputs. Each rewritten config holds the same values. A one-off script migrates saved runs; on run folders recreated in the old layout, every stage resumed with its checkpoint. |
 
 ## Testing
 
 `mlcore`'s tests are in `tests/` at the repo root. Tests that build a decoder-only model or call
 a Triton kernel are marked `cuda` and skip without a GPU; CI runs the rest on every change.
 `mlcore.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
-conftest with `pytest_plugins = ["mlcore.testing"]`.
+conftest with `pytest_plugins = ["mlcore.testing"]`. `tests/fixtures/` and each project's
+`tests/fixtures/` hold the model layouts and weight hashes recorded from the code before #11,
+which the model tests compare against.
 
 ## Limitations and next steps
 
-- **The config contract is implicit.** Configs are untyped dicts, so a misspelt key fails when
-  it is first read, possibly hours into a run, and the fingerprint's key lists live in
-  `runs.py` rather than with the settings they describe.
-- **Some conventions are fixed.** `runs.parse_config` reads `configs/<name>.yaml` relative to
-  the working directory. The optimiser is AdamW with weight decay 0.01, and gradients are
-  clipped at norm 1.0.
+- **Code reads the dicts, not the parsed config.** Configs are parsed to check them and to
+  compare fingerprints, but the code then reads the YAML's dicts by key. Moving it to the
+  typed objects would let editors and type checkers follow settings through the code.
+- **Some training choices are fixed.** The optimiser is AdamW with weight decay 0.01, and
+  gradients are clipped at norm 1.0. The next step is to make them configurable, with their
+  defaults matching today's values.
+- **`runs.parse_config` reads `configs/<name>.yaml`** relative to the working directory, so
+  scripts run from the project folder.
 - **`supervised_loop` takes the tokenizer only for its pad id.**
 - **Generation is decoder-only.** The encoder-decoder's decoding stays in its project until a
   second encoder-decoder needs it.
 - **Two projects is a small sample.** The boundaries fit both, but a third project would test
   whether they generalise.
-
-The next step is typed config classes with a registry of components, so that models and
-training stages are defined in config and validated when it loads. That would make the
-contract above explicit and checked rather than documented.
