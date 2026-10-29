@@ -3,16 +3,11 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from lab.config import Component, resumable
+from lab.config import Component
 from lab.models import MODELS, encoder_decoder
 from lab.runs import RunConfig
 from lab.tokenizer import TOKENIZERS
 from lab.training import StageConfig, SupervisedStage
-
-
-@dataclass(frozen=True, kw_only=True)
-class TranslationTrain(SupervisedStage):
-    num_workers: int = resumable(0)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -24,7 +19,7 @@ class TranslationData:
 
 @dataclass(frozen=True, kw_only=True)
 class TranslationStage(StageConfig):
-    train: TranslationTrain
+    train: SupervisedStage
     data: TranslationData
 
 

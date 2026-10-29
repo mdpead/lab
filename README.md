@@ -78,7 +78,7 @@ contract, and how each extraction was checked to change nothing.
 | `lab.kernels` | Triton flash attention, plus reference add and matmul kernels |
 | `lab.generation` | Batched greedy and sampled decoding with a KV cache |
 | `lab.training` | `supervised_loop`, which a project gives its loss; checkpoints, resume, stage seeding, LR schedules |
-| `lab.data.samplers` | Resumable infinite and token-budget samplers |
+| `lab.data` | Resumable infinite and token-budget samplers, padding, and each split's data loader |
 | `lab.runs` | Run and stage directories, config fingerprints, logging |
 | `lab.tokenizer` | WordPiece and byte-level BPE tokenizers chosen in config, trained on a project's text and saved with the run |
 | `lab.testing` | Pytest fixtures and markers shared by the test suites |

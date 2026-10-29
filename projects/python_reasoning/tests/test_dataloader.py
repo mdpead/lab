@@ -5,10 +5,13 @@ prompt/completion mask boundary, and that output_ids is a copy rather than a vie
 """
 
 import itertools
+import json
+from pathlib import Path
 
 import pytest
 import torch
 from lab.data.samplers import InfiniteRandomSampler, TokenSampler, resume_at_minibatch
+from lab.testing import batch_digest
 
 from src.dataloader import (
     PromptSampler,
@@ -479,3 +482,22 @@ def test_rl_train_loader_resumes(rl_rows, tokenizer, config):
     loaders = create_dataloaders_rl(rl_rows, tokenizer, config)
     resume_at_minibatch(loaders["train"], 2)
     assert loaders["train"].batch_sampler.start_minibatch == 2
+
+
+# --- batches recorded from the loaders before they moved into lab ---
+
+REFERENCE = json.loads((Path(__file__).parent / "fixtures/batches.json").read_text())
+
+
+def test_loaders_yield_the_recorded_batches(splits, sft_splits, tokenizer, config, sft_config):
+    config["stages"]["pretrain"]["train"]["num_workers"] = 0
+    sft_config["stages"]["sft"]["train"]["num_workers"] = 0
+    pretrain = create_dataloaders_pretrain(splits, tokenizer, config)
+    sft = create_dataloaders_sft(sft_splits, tokenizer, sft_config)
+    digests = {
+        "pretrain_train": batch_digest(pretrain["train"], 30),
+        "pretrain_test": batch_digest(pretrain["test"], 30),
+        "sft_train": batch_digest(sft["train"], 30),
+        "sft_test": batch_digest(sft["test"], 30),
+    }
+    assert digests == REFERENCE

@@ -13,7 +13,7 @@ plugs in, and how each change was checked to leave results unchanged.
 | `layers`, `kernels` | through its model | through its model, including Triton flash attention |
 | `config` | its schema, built on `RunConfig`, `StageConfig` and `SupervisedStage` | its schema, built on the same, plus `TrainStage` for RL |
 | `training` | `train`, `supervised_loop` | `train`, `supervised_loop` for pretraining and SFT; `train` with its own RL loop |
-| `data.samplers` | `TokenSampler` | `InfiniteRandomSampler`, `TokenSampler` |
+| `data` | `token_budget_loaders`, `pad` | `token_budget_loaders` and `pad` for SFT, `loader_options` and `InfiniteRandomSampler` for pretraining |
 | `generation` | | KV-cache decoding, for evaluation and RL rollouts |
 | `runs`, `tokenizer` | yes | yes |
 
@@ -37,7 +37,7 @@ later move followed the same rule:
 |---|---|
 | The RL loop (`python_reasoning/src/rl.py`) | One user, and it does not fit the supervised shape: it generates rollouts, scores them by running code, and trains on group-relative advantages. It still uses `training.train` for resume and checkpoints. |
 | Encoder-decoder decoding (`en_cy_translation/src/generation.py`, greedy, for BLEU during training; beam search comes from its Hugging Face wrapper) | One user. `lab.generation` is the decoder-only KV-cache path the reasoning project needs. |
-| Batch collation, data preparation, the text a tokenizer trains on | Task-specific by nature: they decide what a batch means. |
+| Batch collation, data preparation, the text a tokenizer trains on | Task-specific by nature: they decide what a batch means. The library pads rows and builds the loaders; the project's collate function decides which fields go where. |
 | BLEU, execution-checked answers | The task's definition of success, passed to the library as a callback. |
 | Data and task settings in the config | Only the project reads them, so only its schema declares them. |
 
@@ -203,6 +203,7 @@ models/<name>/
 | Check configs against typed schemas ([#10](https://github.com/mdpead/lab/pull/10)) | Every config file parses; the schema's resumable fields give the same fingerprint as the old hard-coded key list for every stage of every config. |
 | Build models from named components, stage-first configs ([#11](https://github.com/mdpead/lab/pull/11)) | Against fixtures recorded from the old code: identical seeded weights for both families, identical parameter names, shapes and counts for every config, and bitwise-identical encoder-decoder outputs. Each rewritten config holds the same values. A one-off script migrates saved runs; on run folders recreated in the old layout, every stage resumed with its checkpoint. |
 | Share the tokenizers ([#14](https://github.com/mdpead/lab/pull/14)) | Against fixtures recorded from each project's tokenizer code: an identical serialized BPE tokenizer, with and without digit splitting. WordPiece training breaks ties randomly, so its learned vocabulary differs between runs of the old code too; its normalizer, pre-tokenizer, decoder, post-processor and special-token ids are identical. The migration script brings saved configs to the new section, so trained tokenizers are kept. |
+| Share the data loaders and their worker settings ([#15](https://github.com/mdpead/lab/pull/15)) | Against hashes of the first 30 batches each old loader yielded on fixed rows: translation, pretraining and SFT, train and test splits, all identical. |
 
 ## Testing
 
@@ -210,8 +211,9 @@ The package's tests are in `tests/` at the repo root. Tests that build a decoder
 a Triton kernel are marked `cuda` and skip without a GPU; CI runs the rest on every change.
 `lab.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
 conftest with `pytest_plugins = ["lab.testing"]`. `tests/fixtures/` and each project's
-`tests/fixtures/` hold the model layouts and weight hashes recorded from the code before #11,
-which the model tests compare against, and the tokenizers recorded before #14.
+`tests/fixtures/` hold what the code produced before each refactor, which the tests compare
+against: model layouts and weight hashes from before #11, tokenizers from before #14, and
+hashes of the batches each project's loaders yielded before #15.
 
 ## Limitations and next steps
 

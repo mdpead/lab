@@ -175,7 +175,7 @@ lab/
   kernels/              Triton kernels, including flash attention forward and backward
   generation.py         Batched sampling with a KV cache
   training.py           Checkpoints, resume, stage seeding, LR schedules
-  data/samplers.py      Resumable infinite and token-budget samplers
+  data/                 Resumable samplers, padding, and data loaders
   runs.py               Run and stage directories, config fingerprints, logging
   tokenizer.py          WordPiece and byte-level BPE, trained, saved and loaded
 ```

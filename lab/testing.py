@@ -1,8 +1,13 @@
 """Pytest fixtures and hooks for testing the decoder-only model, shared by the test suites.
 
 Load it from a conftest.py with `pytest_plugins = ["lab.testing"]`. It adds the `cuda` and
-`benchmark` markers, a `--benchmark` option, a per-test seed, a tiny tokenizer and small models.
+`benchmark` markers, a `--benchmark` option, a per-test seed, a tiny tokenizer and small models,
+and `batch_digest` for checking that a data loader yields the batches it did before.
 """
+
+import hashlib
+import itertools
+from collections.abc import Iterable
 
 import pytest
 import torch
@@ -41,6 +46,21 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(no_cuda)
         elif "benchmark" in item.keywords and not config.getoption("--benchmark"):
             item.add_marker(not_asked)
+
+
+def batch_digest(loader: Iterable, num_batches: int | None = None) -> str:
+    """A hash of the batches a loader yields, its first `num_batches` if it never ends.
+
+    Covers every tensor's values, dtype and shape, and any other values, under their keys.
+    """
+    digest = hashlib.sha256()
+    for batch in itertools.islice(loader, num_batches):
+        items = batch.items() if isinstance(batch, dict) else [("", batch)]
+        for key, value in sorted(items):
+            if isinstance(value, torch.Tensor):
+                value = (str(value.dtype), list(value.shape), value.flatten().tolist())
+            digest.update(repr((key, value)).encode())
+    return digest.hexdigest()
 
 
 @pytest.fixture(autouse=True)
