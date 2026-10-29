@@ -1,4 +1,4 @@
-# python-reasoning-lm
+# Python Reasoning LM
 
 [![CI](https://github.com/mdpead/lab/actions/workflows/ci.yml/badge.svg)](https://github.com/mdpead/lab/actions/workflows/ci.yml)
 
@@ -196,4 +196,4 @@ mlcore/
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../../LICENSE).
