@@ -17,6 +17,10 @@ dependencies = [
     "PyYAML",
 ]
 
+[project.optional-dependencies]
+# mlcore.testing, the pytest plugin the test suites load
+test = ["pytest"]
+
 [tool.setuptools.packages.find]
 # The repo root also holds projects/, whose src/ and scripts/ must not be packaged
 include = ["mlcore*"]
