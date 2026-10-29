@@ -2,7 +2,7 @@
 
 import datasets
 import pytest
-from mlcore.data.samplers import TokenSampler
+from lab.data.samplers import TokenSampler
 
 from src import data, dataloader
 

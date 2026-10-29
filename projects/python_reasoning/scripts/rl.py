@@ -5,8 +5,8 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import logging
 
-from mlcore import runs, tokenizer
-from mlcore.models import build_model
+from lab import runs, tokenizer
+from lab.models import build_model
 
 from src import data, dataloader, rl
 from src.config import Config

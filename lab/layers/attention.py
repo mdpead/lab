@@ -3,9 +3,9 @@ import math
 import torch
 from torch import Tensor, nn
 
-from mlcore.config import Registry
-from mlcore.kernels import flash_attention
-from mlcore.layers.position import RotaryPositionalEncoding
+from lab.config import Registry
+from lab.kernels import flash_attention
+from lab.layers.position import RotaryPositionalEncoding
 
 ATTENTIONS = Registry("attention", provided=("d_model", "rope_layer", "dropout"))
 

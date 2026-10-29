@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor, nn
 
-from mlcore.config import Registry
+from lab.config import Registry
 
 NORMS = Registry("norm", provided=("d_model",))
 

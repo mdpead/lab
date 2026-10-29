@@ -1,7 +1,7 @@
 import logging
 
-from mlcore import runs, tokenizer
-from mlcore.models import build_model
+from lab import runs, tokenizer
+from lab.models import build_model
 
 from src import data, dataloader, train
 from src.config import Config

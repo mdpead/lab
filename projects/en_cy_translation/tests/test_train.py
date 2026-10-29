@@ -3,7 +3,7 @@ import os
 
 import pytest
 import torch
-from mlcore import runs, training
+from lab import runs, training
 
 from src import dataloader, train
 from src.config import Config

@@ -2,8 +2,8 @@ from functools import partial
 from typing import Any
 
 import torch
-from mlcore import runs, training
-from mlcore.models.decoder_only import Transformer
+from lab import runs, training
+from lab.models.decoder_only import Transformer
 from torch import nn
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast

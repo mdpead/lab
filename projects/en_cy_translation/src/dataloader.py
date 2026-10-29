@@ -3,8 +3,8 @@ from functools import partial
 from typing import Any
 
 import torch
-from mlcore import runs
-from mlcore.data.samplers import TokenSampler
+from lab import runs
+from lab.data.samplers import TokenSampler
 from torch.utils.data import DataLoader
 
 from datasets import DatasetDict

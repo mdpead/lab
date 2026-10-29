@@ -14,14 +14,14 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
-from mlcore import runs
-from mlcore.config import resumable
-from mlcore.data.samplers import resume_at_minibatch
+from lab import runs
+from lab.config import resumable
+from lab.data.samplers import resume_at_minibatch
 
 
 @dataclass(frozen=True, kw_only=True)
 class TrainStage:
-    """The `train.<stage>` settings mlcore reads, for any kind of stage.
+    """The `stages.<stage>.train` settings the lab package reads, for any kind of stage.
 
     Defaults match what the code assumes when a key is left out. Fields marked `resumable()`
     can change without clearing the stage's checkpoints. A project subclasses this to add its

@@ -11,8 +11,8 @@ import numpy as np
 import torch
 import yaml
 
-from mlcore import config as config_schema
-from mlcore.config import Config
+from lab import config as config_schema
+from lab.config import Config
 
 __all__ = ["Config", "Locations", "RunConfig"]
 
@@ -25,7 +25,7 @@ class Locations:
 
 @dataclass(frozen=True, kw_only=True)
 class RunConfig:
-    """The top-level settings mlcore reads. A project's schema subclasses it, adding its
+    """The top-level settings the lab package reads. A project's schema subclasses it, adding its
     `model`, `tokenizer` and `stages` sections."""
 
     name: str

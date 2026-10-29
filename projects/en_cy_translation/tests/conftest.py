@@ -2,7 +2,7 @@ import copy
 
 import pytest
 import torch
-from mlcore.models import build_model
+from lab.models import build_model
 
 from datasets import Dataset, DatasetDict
 from src import tokenizer

@@ -4,10 +4,10 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
-from mlcore import generation, training
-from mlcore.data.samplers import resume_at_minibatch
-from mlcore.models.decoder_only import Transformer
-from mlcore.runs import Config
+from lab import generation, training
+from lab.data.samplers import resume_at_minibatch
+from lab.models.decoder_only import Transformer
+from lab.runs import Config
 from torch import Tensor, amp
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast

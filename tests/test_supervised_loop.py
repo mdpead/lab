@@ -9,8 +9,8 @@ from datasets import Dataset
 from torch import nn
 from torch.utils.data import DataLoader
 
-from mlcore import runs, training
-from mlcore.data.samplers import TokenSampler
+from lab import runs, training
+from lab.data.samplers import TokenSampler
 
 STAGE = "s"
 PAD = 2

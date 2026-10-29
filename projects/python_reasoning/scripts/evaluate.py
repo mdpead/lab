@@ -9,8 +9,8 @@ import logging
 from typing import Any
 
 import torch
-from mlcore import generation, runs, tokenizer, training
-from mlcore.models import build_model
+from lab import generation, runs, tokenizer, training
+from lab.models import build_model
 
 from src import data, rl
 from src.config import Config

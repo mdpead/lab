@@ -4,7 +4,7 @@ A project describes its config as frozen, keyword-only dataclasses (keyword-only
 can add required fields after a base class's defaults). `parse` walks the YAML against them and
 fails on the first problem, naming its path: a misspelt or unknown key, a missing setting, or
 a value of the wrong type. Fields that can change without invalidating a stage's checkpoints
-are marked with `resumable()`, and the stage fingerprint in `mlcore.runs` reads that mark.
+are marked with `resumable()`, and the stage fingerprint in `lab.runs` reads that mark.
 
 Swappable components come from a `Registry`. A field annotated `Annotated[T, REGISTRY]` takes a
 block like `{type: rms, eps: 1.0e-6}`: `type` picks a registered class, and the rest of the

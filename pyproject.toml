@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlcore"
+name = "lab"
 version = "0.1.0"
 description = "From-scratch PyTorch building blocks shared by the projects in this repo"
 requires-python = ">=3.13"
@@ -18,12 +18,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# mlcore.testing, the pytest plugin the test suites load
+# lab.testing, the pytest plugin the test suites load
 test = ["pytest"]
 
 [tool.setuptools.packages.find]
 # The repo root also holds projects/, whose src/ and scripts/ must not be packaged
-include = ["mlcore*"]
+include = ["lab*"]
 
 [tool.ruff]
 line-length = 100
@@ -36,7 +36,7 @@ select = ["E", "F", "I", "UP"]
 ignore = ["E731", "E741"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mlcore"]
+known-first-party = ["lab"]
 
 [tool.pytest.ini_options]
 # Projects run their own tests from their own folders

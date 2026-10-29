@@ -10,9 +10,9 @@ from typing import Annotated
 import torch
 from torch import Tensor, nn
 
-from mlcore.config import Component
-from mlcore.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS, Embedding
-from mlcore.models.registry import MODELS
+from lab.config import Component
+from lab.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS, Embedding
+from lab.models.registry import MODELS
 
 
 @MODELS.register("encoder_decoder")

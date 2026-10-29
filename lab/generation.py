@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch import Tensor, amp
 from transformers import PreTrainedTokenizerFast
 
-from mlcore.models.decoder_only import Transformer
+from lab.models.decoder_only import Transformer
 
 
 def make_kv_cache(

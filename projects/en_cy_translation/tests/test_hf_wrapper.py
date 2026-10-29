@@ -2,8 +2,8 @@ import os
 
 import pytest
 import torch
-from mlcore import runs, training
-from mlcore.models import build_model
+from lab import runs, training
+from lab.models import build_model
 
 from src import generation
 from src.config import Config

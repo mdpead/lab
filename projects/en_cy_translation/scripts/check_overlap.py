@@ -8,7 +8,7 @@ from datasets import load_dataset
 
 sys.path.insert(0, ".")
 
-from mlcore import runs
+from lab import runs
 
 from src import datasets as ds_module
 from src.config import Config

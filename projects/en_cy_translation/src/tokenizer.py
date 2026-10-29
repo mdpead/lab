@@ -1,8 +1,8 @@
 import itertools
 from typing import Any
 
-from mlcore import runs
-from mlcore import tokenizer as tokenizer_utils
+from lab import runs
+from lab import tokenizer as tokenizer_utils
 from tokenizers import (
     Tokenizer,
     decoders,

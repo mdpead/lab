@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from mlcore import runs
-from mlcore import tokenizer as tokenizer_utils
+from lab import runs
+from lab import tokenizer as tokenizer_utils
 
 
 def _run_config(tmp_path, vocab_size=100):

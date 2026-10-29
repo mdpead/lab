@@ -1,6 +1,6 @@
-"""Pytest fixtures and hooks for testing mlcore's decoder-only model, shared by the test suites.
+"""Pytest fixtures and hooks for testing the decoder-only model, shared by the test suites.
 
-Load it from a conftest.py with `pytest_plugins = ["mlcore.testing"]`. It adds the `cuda` and
+Load it from a conftest.py with `pytest_plugins = ["lab.testing"]`. It adds the `cuda` and
 `benchmark` markers, a `--benchmark` option, a per-test seed, a tiny tokenizer and small models.
 """
 
@@ -9,8 +9,8 @@ import torch
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from mlcore.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS
-from mlcore.models.decoder_only import ModelConfig, Transformer
+from lab.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS
+from lab.models.decoder_only import ModelConfig, Transformer
 
 
 def pytest_addoption(parser):

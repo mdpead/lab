@@ -4,8 +4,8 @@ from typing import Any
 
 import datasets as hf_datasets
 import torch
-from mlcore.data.samplers import InfiniteRandomSampler, Rows, TokenSampler
-from mlcore.runs import Config
+from lab.data.samplers import InfiniteRandomSampler, Rows, TokenSampler
+from lab.runs import Config
 from torch import Tensor
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast

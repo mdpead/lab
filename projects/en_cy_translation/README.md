@@ -105,10 +105,10 @@ FLORES+ devtest has been checked against the Cardiff training split on both the 
 
 ## Setup
 
-This project lives in the [lab](../../README.md) monorepo and builds on its shared `mlcore`
-library: the Transformer is `mlcore.models.encoder_decoder`, and checkpointing, resume and
-run directories come from `mlcore.training` and `mlcore.runs`. Python 3.13; run pip from this
-folder so `mlcore` installs from the repo root:
+This project lives in the [lab](../../README.md) monorepo and builds on its shared `lab`
+package: the Transformer is `lab.models.encoder_decoder`, and checkpointing, resume and
+run directories come from `lab.training` and `lab.runs`. Python 3.13; run pip from this
+folder so the `lab` package installs from the repo root:
 
 ```bash
 python -m venv .venv

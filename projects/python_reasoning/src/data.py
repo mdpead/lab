@@ -7,7 +7,7 @@ from typing import Any
 
 import datasets as hf_datasets
 import numpy as np
-from mlcore.runs import Config
+from lab.runs import Config
 from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerFast
