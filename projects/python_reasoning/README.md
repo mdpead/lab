@@ -1,6 +1,6 @@
 # python-reasoning-lm
 
-[![CI](https://github.com/mdpead/python-reasoning-lm/actions/workflows/ci.yml/badge.svg)](https://github.com/mdpead/python-reasoning-lm/actions/workflows/ci.yml)
+[![CI](https://github.com/mdpead/lab/actions/workflows/ci.yml/badge.svg)](https://github.com/mdpead/lab/actions/workflows/ci.yml)
 
 A language model built from scratch and trained through three stages on a single 16 GB GPU: pretraining on Python source, supervised fine-tuning to trace small programs step by step, and reinforcement learning with rewards checked by actually running the program.
 
