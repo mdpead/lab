@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from mlcore.config import resumable
-from mlcore.models import MODELS, decoder_only
-from mlcore.runs import RunConfig
-from mlcore.training import StageConfig, SupervisedStage, TrainStage
+from lab.config import resumable
+from lab.models import MODELS, decoder_only
+from lab.runs import RunConfig
+from lab.training import StageConfig, SupervisedStage, TrainStage
 
 Tier = Literal["easy", "medium", "hard"]
 Task = Literal["output", "input", "search"]

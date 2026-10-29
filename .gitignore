@@ -17,4 +17,4 @@ dist/
 venv/
 
 # Project-specific outputs (checkpoints, data, runs) are ignored by each project's own
-# .gitignore. Patterns like `data/` here would also match mlcore/data/.
+# .gitignore. Patterns like `data/` here would also match lab/data/.

@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 import pytest
 import yaml
 
-from mlcore.config import (
+from lab.config import (
     Component,
     ConfigError,
     Registry,
@@ -16,7 +16,7 @@ from mlcore.config import (
     resumable_keys,
     stage_class,
 )
-from mlcore.training import StageConfig, SupervisedStage, TrainStage
+from lab.training import StageConfig, SupervisedStage, TrainStage
 
 
 @dataclass(frozen=True, kw_only=True)

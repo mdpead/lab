@@ -11,9 +11,9 @@ import json
 import pytest
 import torch
 
-from mlcore.config import ConfigError
-from mlcore.layers import MixtureOfExpertsFeedForward, SwiGLUFeedForward
-from mlcore.models import build_model, parse_model
+from lab.config import ConfigError
+from lab.layers import MixtureOfExpertsFeedForward, SwiGLUFeedForward
+from lab.models import build_model, parse_model
 
 REFERENCE = json.load(open("tests/fixtures/model_reference.json"))["tiny"]
 

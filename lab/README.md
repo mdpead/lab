@@ -1,4 +1,4 @@
-# mlcore
+# The `lab` package
 
 The library the projects in this repo build on: model layers, Triton kernels, generation, typed
 configs, and the training infrastructure around a project's own loss. This page explains how
@@ -25,18 +25,18 @@ and checkpoint schedule, exact resume, run directories, and checking configs. Th
 decides what a batch contains, what the loss is, what counts as a good result, and how its
 data and tokenizer are built.
 
-The config follows the same line. `mlcore` declares the settings it reads, and a project's
+The config follows the same line. The package declares the settings it reads, and a project's
 schema subclasses those classes to add its own, so every key in a config file belongs to
 exactly one class.
 
 **Code moves in when a second project needs it, not before.** Nothing was designed in advance.
-`mlcore` began as the parts of `python_reasoning` that `en_cy_translation` duplicated, and each
+The package began as the parts of `python_reasoning` that `en_cy_translation` duplicated, and each
 later move followed the same rule:
 
 | Stayed in the project | Why |
 |---|---|
 | The RL loop (`python_reasoning/src/rl.py`) | One user, and it does not fit the supervised shape: it generates rollouts, scores them by running code, and trains on group-relative advantages. It still uses `training.train` for resume and checkpoints. |
-| Encoder-decoder decoding (`en_cy_translation/src/generation.py`, greedy, for BLEU during training; beam search comes from its Hugging Face wrapper) | One user. `mlcore.generation` is the decoder-only KV-cache path the reasoning project needs. |
+| Encoder-decoder decoding (`en_cy_translation/src/generation.py`, greedy, for BLEU during training; beam search comes from its Hugging Face wrapper) | One user. `lab.generation` is the decoder-only KV-cache path the reasoning project needs. |
 | Batch collation, data preparation, tokenizer training | Task-specific by nature: they decide what a batch means. |
 | BLEU, execution-checked answers | The task's definition of success, passed to the library as a callback. |
 | Data and task settings in the config | Only the project reads them, so only its schema declares them. |
@@ -61,19 +61,28 @@ subclassing the training code:
 | A schema | frozen dataclasses subclassing `RunConfig`, `StageConfig` and `TrainStage` or `SupervisedStage` | `runs.parse_config`, `runs.init_run` |
 
 The translation project's whole training module is a loss, a BLEU callback and two calls into
-`mlcore`:
+`lab`:
 
 ```python
 def compute_loss(model, batch, criterion):
-    logits = model(batch["src_input_ids"], batch["tgt_input_ids"],
-                   batch["src_padding_mask"], batch["tgt_padding_mask"])
+    logits = model(
+        batch["src_input_ids"],
+        batch["tgt_input_ids"],
+        batch["src_padding_mask"],
+        batch["tgt_padding_mask"],
+    )
     loss = criterion(logits.reshape(-1, logits.shape[2]), batch["tgt_output_ids"].reshape(-1))
     return loss, {"loss": loss}
 
 
 def train_loop(stage, model, dataloaders, tokenizer, run, config):
     training.supervised_loop(
-        stage, model, dataloaders, tokenizer, run, config,
+        stage,
+        model,
+        dataloaders,
+        tokenizer,
+        run,
+        config,
         compute_loss=partial(compute_loss, criterion=run["criterion"]),
         tokens_key="src_input_ids",
         validation_metrics=lambda m, batch: generate_metrics(m, batch, ...),  # BLEU
@@ -186,7 +195,7 @@ models/<name>/
 | Change | Check |
 |---|---|
 | Extract the shared code from `python_reasoning` ([#2](https://github.com/mdpead/lab/pull/2)) | Every line of the original files compared against the new layout; the same 243 tests before and after, with the same 101 passing on CPU. |
-| Add the encoder-decoder and move `en_cy_translation` onto `mlcore` and newer dependencies ([#3](https://github.com/mdpead/lab/pull/3)) | Weight names kept, so existing checkpoints and the published model load. The published model's greedy and beam-search translations identical across old and new code and versions, with logits within 1e-5. |
+| Add the encoder-decoder and move `en_cy_translation` onto the package and newer dependencies ([#3](https://github.com/mdpead/lab/pull/3)) | Weight names kept, so existing checkpoints and the published model load. The published model's greedy and beam-search translations identical across old and new code and versions, with logits within 1e-5. |
 | Share the supervised loop ([#5](https://github.com/mdpead/lab/pull/5)) | Bitwise-identical `results.json`, apart from timings, before and after: translation on CPU and GPU, reasoning SFT on GPU. |
 | Share the test fixtures ([#7](https://github.com/mdpead/lab/pull/7)) | The same tests collected and passing in all three suites before and after. |
 | Check configs against typed schemas ([#10](https://github.com/mdpead/lab/pull/10)) | Every config file parses; the schema's resumable fields give the same fingerprint as the old hard-coded key list for every stage of every config. |
@@ -194,10 +203,10 @@ models/<name>/
 
 ## Testing
 
-`mlcore`'s tests are in `tests/` at the repo root. Tests that build a decoder-only model or call
+The package's tests are in `tests/` at the repo root. Tests that build a decoder-only model or call
 a Triton kernel are marked `cuda` and skip without a GPU; CI runs the rest on every change.
-`mlcore.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
-conftest with `pytest_plugins = ["mlcore.testing"]`. `tests/fixtures/` and each project's
+`lab.testing` is a pytest plugin with the shared markers and fixtures, loaded from a
+conftest with `pytest_plugins = ["lab.testing"]`. `tests/fixtures/` and each project's
 `tests/fixtures/` hold the model layouts and weight hashes recorded from the code before #11,
 which the model tests compare against.
 

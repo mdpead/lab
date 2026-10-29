@@ -1,2 +1,2 @@
-# Fixtures and markers shared with mlcore's own tests
-pytest_plugins = ["mlcore.testing"]
+# Fixtures and markers shared with the lab package's own tests
+pytest_plugins = ["lab.testing"]

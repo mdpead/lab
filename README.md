@@ -5,7 +5,7 @@
 Language models built from scratch in PyTorch, with no training framework: a translation model
 that outperforms a model 25 times its size, and a reasoning model trained through pretraining,
 fine-tuning and reinforcement learning on a single 16 GB GPU. The parts they share live in
-`mlcore`, a small library of layers, Triton kernels and training infrastructure.
+the `lab` package, a small library of layers, Triton kernels and training infrastructure.
 
 ## Projects
 
@@ -64,30 +64,30 @@ as what did.
 About 300 tests. CI runs the CPU tests on every change; those that build a model or call a
 Triton kernel need a GPU and run locally.
 
-## mlcore
+## The `lab` package
 
-[mlcore/README.md](mlcore/README.md) explains how the library is organised: where the line
+[lab/README.md](lab/README.md) explains how the library is organised: where the line
 between library and project falls, the extension points a project plugs into, the config
 contract, and how each extraction was checked to change nothing.
 
 | Module | Contents |
 |---|---|
-| `mlcore.config` | Typed configs checked when they load, with registries of swappable components |
-| `mlcore.layers` | Grouped-query and multi-head attention, RoPE and sinusoidal positions, RMSNorm and LayerNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
-| `mlcore.models` | `decoder_only` and `encoder_decoder` Transformers, assembled from the components a config names; `build_model` |
-| `mlcore.kernels` | Triton flash attention, plus reference add and matmul kernels |
-| `mlcore.generation` | Batched greedy and sampled decoding with a KV cache |
-| `mlcore.training` | `supervised_loop`, which a project gives its loss; checkpoints, resume, stage seeding, LR schedules |
-| `mlcore.data.samplers` | Resumable infinite and token-budget samplers |
-| `mlcore.runs` | Run and stage directories, config fingerprints, logging |
-| `mlcore.tokenizer` | Saving, loading and caching a trained tokenizer |
-| `mlcore.testing` | Pytest fixtures and markers shared by the test suites |
+| `lab.config` | Typed configs checked when they load, with registries of swappable components |
+| `lab.layers` | Grouped-query and multi-head attention, RoPE and sinusoidal positions, RMSNorm and LayerNorm, ReLU and SwiGLU feed-forwards, mixture of experts, embedding |
+| `lab.models` | `decoder_only` and `encoder_decoder` Transformers, assembled from the components a config names; `build_model` |
+| `lab.kernels` | Triton flash attention, plus reference add and matmul kernels |
+| `lab.generation` | Batched greedy and sampled decoding with a KV cache |
+| `lab.training` | `supervised_loop`, which a project gives its loss; checkpoints, resume, stage seeding, LR schedules |
+| `lab.data.samplers` | Resumable infinite and token-budget samplers |
+| `lab.runs` | Run and stage directories, config fingerprints, logging |
+| `lab.tokenizer` | Saving, loading and caching a trained tokenizer |
+| `lab.testing` | Pytest fixtures and markers shared by the test suites |
 
 ## Running it
 
 Requires Python 3.13. Training the reasoning model and running the Triton kernels needs Linux
 and an NVIDIA GPU. Each project runs from its own folder, and its `requirements.txt` installs
-`mlcore` from the repo root:
+`lab` from the repo root:
 
 ```bash
 cd projects/python_reasoning
@@ -95,7 +95,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-Each project's README has its training and evaluation commands. To work on `mlcore` itself,
+Each project's README has its training and evaluation commands. To work on the `lab` package itself,
 run `pip install -r requirements.txt` and `pytest` from the repo root.
 
 ## Next

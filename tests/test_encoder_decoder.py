@@ -5,15 +5,15 @@ import math
 import pytest
 import torch
 
-from mlcore.config import ConfigError
-from mlcore.layers import (
+from lab.config import ConfigError
+from lab.layers import (
     Embedding,
     LayerNorm,
     MultiHeadAttention,
     PositionWiseFeedForward,
     SinusoidalPositionalEncoding,
 )
-from mlcore.models import build_model, encoder_decoder, parse_model
+from lab.models import build_model, encoder_decoder, parse_model
 
 CONFIG = {
     "model": {

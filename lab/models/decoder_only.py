@@ -4,8 +4,8 @@ from typing import Annotated
 import torch
 from torch import Tensor, nn
 
-from mlcore.config import Component
-from mlcore.layers import (
+from lab.config import Component
+from lab.layers import (
     ATTENTIONS,
     FEEDFORWARDS,
     NORMS,
@@ -14,7 +14,7 @@ from mlcore.layers import (
     MixtureOfExpertsFeedForward,
     RotaryPositionalEncoding,
 )
-from mlcore.models.registry import MODELS
+from lab.models.registry import MODELS
 
 
 @MODELS.register("decoder_only")

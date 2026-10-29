@@ -4,11 +4,11 @@ from typing import Annotated, Any
 
 from torch import nn
 
-from mlcore.config import Config, parse
+from lab.config import Config, parse
 
 # Imported so each family registers itself with MODELS
-from mlcore.models import decoder_only, encoder_decoder
-from mlcore.models.registry import MODELS
+from lab.models import decoder_only, encoder_decoder
+from lab.models.registry import MODELS
 
 __all__ = ["MODELS", "build_model", "decoder_only", "encoder_decoder", "parse_model"]
 

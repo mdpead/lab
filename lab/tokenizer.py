@@ -5,7 +5,7 @@ from typing import Any
 from datasets import Dataset
 from transformers import PreTrainedTokenizerFast
 
-from mlcore import runs
+from lab import runs
 
 # Trains a tokenizer from a project's datasets and its config's `tokenizer` section
 CreateTokenizer = Callable[[dict[str, Dataset], dict[str, Any]], PreTrainedTokenizerFast]

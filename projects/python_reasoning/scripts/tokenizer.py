@@ -1,6 +1,6 @@
 import logging
 
-from mlcore import runs
+from lab import runs
 
 from src import data, tokenizer
 from src.config import Config

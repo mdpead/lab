@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor, nn
 
-from mlcore.config import Registry
+from lab.config import Registry
 
 POSITIONS = Registry("position", provided=("d_model", "d_h", "max_length"))
 

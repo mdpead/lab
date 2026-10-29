@@ -12,9 +12,9 @@ import os
 import pytest
 import torch
 import yaml
-from mlcore import config as config_schema
-from mlcore import runs
-from mlcore.models import build_model
+from lab import config as config_schema
+from lab import runs
+from lab.models import build_model
 
 from src.config import Config
 

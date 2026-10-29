@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from mlcore.config import resumable
-from mlcore.models import MODELS, encoder_decoder
-from mlcore.runs import RunConfig
-from mlcore.training import StageConfig, SupervisedStage
+from lab.config import resumable
+from lab.models import MODELS, encoder_decoder
+from lab.runs import RunConfig
+from lab.training import StageConfig, SupervisedStage
 
 
 @dataclass(frozen=True, kw_only=True)

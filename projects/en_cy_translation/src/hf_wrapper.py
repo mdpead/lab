@@ -2,9 +2,9 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from mlcore import runs, training
-from mlcore.models import parse_model
-from mlcore.models.encoder_decoder import ModelConfig, Transformer
+from lab import runs, training
+from lab.models import parse_model
+from lab.models.encoder_decoder import ModelConfig, Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 

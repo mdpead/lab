@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 import yaml
 
-from mlcore import runs
-from mlcore.config import ConfigError, resumable
+from lab import runs
+from lab.config import ConfigError, resumable
 
 STAGE = "s"
 

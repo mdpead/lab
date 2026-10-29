@@ -1,7 +1,7 @@
 import re
 
 import torch
-from mlcore.models.encoder_decoder import Transformer
+from lab.models.encoder_decoder import Transformer
 from transformers import PreTrainedTokenizerBase
 
 

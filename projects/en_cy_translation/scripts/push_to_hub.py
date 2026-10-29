@@ -6,8 +6,8 @@ import sys
 sys.path.insert(0, ".")
 
 from huggingface_hub import HfApi
-from mlcore import runs
-from mlcore.tokenizer import load_tokenizer
+from lab import runs
+from lab.tokenizer import load_tokenizer
 
 from src.config import Config
 from src.hf_wrapper import EnCyForTranslation
@@ -34,7 +34,7 @@ model.save_pretrained(tmp_path)
 tokenizer.save_pretrained(tmp_path)
 
 shutil.copy("README.md", f"{tmp_path}/README.md")
-# For reference only: loading needs this project and mlcore installed
+# For reference only: loading needs this project and the lab package installed
 shutil.copy("src/hf_wrapper.py", f"{tmp_path}/hf_wrapper.py")
 
 print(f"Pushing to {args.repo}...")

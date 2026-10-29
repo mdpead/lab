@@ -6,7 +6,7 @@ Moved from python_reasoning's test_train_init.py.
 import pytest
 import torch
 
-from mlcore import runs, training
+from lab import runs, training
 
 DEV = "cuda"
 

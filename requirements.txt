@@ -1,4 +1,4 @@
-# Pinned to the versions mlcore is developed and tested with (Python 3.13, Linux, CUDA).
+# Pinned to the versions the lab package is developed and tested with (Python 3.13, Linux, CUDA).
 # Kept in step with projects/python_reasoning/requirements.txt.
 torch==2.12.1
 triton==3.7.1

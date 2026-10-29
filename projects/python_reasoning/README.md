@@ -4,7 +4,7 @@
 
 A language model built from scratch and trained through three stages on a single 16 GB GPU: pretraining on Python source, supervised fine-tuning to trace small programs step by step, and reinforcement learning with rewards checked by actually running the program.
 
-Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written from scratch, with tests: the shared parts in [`mlcore`](../../mlcore), the library at the root of this repo, and the rest in this project.
+Nothing here wraps a training framework. The attention kernel, the mixture-of-experts layer, the samplers, the generation loop with its KV cache, and the RL loop are all written from scratch, with tests: the shared parts in [`lab`](../../lab), the library at the root of this repo, and the rest in this project.
 
 > **Status:** the full pipeline has been run end to end at full size, and every stage is tested. Pretraining adds about 3 points of accuracy over training from scratch, provided the fine-tuning learning rate is kept high. RL helped on one of three tasks.
 
@@ -91,7 +91,7 @@ Full tables, per-step curves and failure analysis are in [docs/results.md](docs/
 
 Requires Linux, an NVIDIA GPU with CUDA, and Python 3.13. Developed on an RTX 5070 Ti (16 GB) with PyTorch 2.12 and Triton 3.7.
 
-Run everything from this folder. `requirements.txt` also installs `mlcore` from the repo root.
+Run everything from this folder. `requirements.txt` also installs the `lab` package from the repo root.
 
 ```bash
 pip install -r requirements.txt
@@ -143,7 +143,7 @@ ruff check . && ruff format --check .                       # lint and formattin
 
 Tests that build a model are marked `cuda` and skipped without a GPU. The rest, covering program generation, data preparation, sampling and reward scoring, run on CPU in a few seconds.
 
-The model, kernel, generation and training tests live with `mlcore`. From the repo root:
+The model, kernel, generation and training tests live with the `lab` package. From the repo root:
 
 ```bash
 pytest                                                      # 149 tests with CUDA, 26 without
@@ -166,10 +166,10 @@ docs/           Results, model and kernel, RL loop, lessons learned
 tests/          One file per module
 ```
 
-The shared code lives in [`mlcore`](../../mlcore) at the repo root:
+The shared code lives in the [`lab`](../../lab) package at the repo root:
 
 ```
-mlcore/
+lab/
   layers/               GQA, RoPE, RMSNorm, SwiGLU, mixture of experts
   models/               The decoder-only Transformer, built from the config's model section
   kernels/              Triton kernels, including flash attention forward and backward

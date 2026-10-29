@@ -2,7 +2,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from mlcore.config import Registry
+from lab.config import Registry
 
 FEEDFORWARDS = Registry("feedforward", provided=("d_model",))
 

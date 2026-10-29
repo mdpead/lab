@@ -5,7 +5,7 @@ Built on synthetic rows. Moved from python_reasoning's test_dataloader.py.
 
 import pytest
 
-from mlcore.data.samplers import InfiniteRandomSampler, TokenSampler
+from lab.data.samplers import InfiniteRandomSampler, TokenSampler
 
 NUM_BLOCKS = 20
 

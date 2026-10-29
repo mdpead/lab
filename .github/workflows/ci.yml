@@ -5,8 +5,8 @@ on:
     branches: [main]
   pull_request:
 
-# mlcore runs from the repo root; each project runs from its own folder with its own
-# pinned requirements, which install mlcore from the root.
+# The lab package runs from the repo root; each project runs from its own folder with its own
+# pinned requirements, which install it from the root.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -14,9 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: mlcore
+          - name: lab
             dir: .
-            paths: mlcore tests tools
+            paths: lab tests tools
             python: "3.13"
           - name: en_cy_translation
             dir: projects/en_cy_translation
@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: mlcore
+          - name: lab
             dir: .
             python: "3.13"
           - name: en_cy_translation

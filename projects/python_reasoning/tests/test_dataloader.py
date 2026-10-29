@@ -8,7 +8,7 @@ import itertools
 
 import pytest
 import torch
-from mlcore.data.samplers import InfiniteRandomSampler, TokenSampler, resume_at_minibatch
+from lab.data.samplers import InfiniteRandomSampler, TokenSampler, resume_at_minibatch
 
 from src.dataloader import (
     PromptSampler,

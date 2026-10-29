@@ -2,8 +2,8 @@ import itertools
 from typing import Any
 
 from datasets import Dataset
-from mlcore import runs
-from mlcore import tokenizer as tokenizer_utils
+from lab import runs
+from lab import tokenizer as tokenizer_utils
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, processors, trainers
 from transformers import PreTrainedTokenizerFast
 
