@@ -1,20 +1,17 @@
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated
 
 import torch
 from torch import Tensor, nn
 
+from mlcore.config import Component
 from mlcore.layers import (
     ATTENTIONS,
     FEEDFORWARDS,
     NORMS,
     POSITIONS,
     Embedding,
-    FeedForwardConfig,
-    GroupedQueryAttentionConfig,
     MixtureOfExpertsFeedForward,
-    NormConfig,
-    RotaryConfig,
     RotaryPositionalEncoding,
 )
 from mlcore.models.registry import MODELS
@@ -32,10 +29,10 @@ class ModelConfig:
     num_layers: int
     max_length: int
     dropout: float
-    norm: Annotated[NormConfig, NORMS]
-    position: Annotated[RotaryConfig, POSITIONS]
-    attention: Annotated[GroupedQueryAttentionConfig, ATTENTIONS]
-    feedforward: Annotated[FeedForwardConfig, FEEDFORWARDS]
+    norm: Annotated[Component, NORMS]
+    position: Annotated[Component, POSITIONS.only("rope")]
+    attention: Annotated[Component, ATTENTIONS.only("gqa")]
+    feedforward: Annotated[Component, FEEDFORWARDS]
 
     def build(self, vocab_size: int) -> "Transformer":
         return Transformer(self, vocab_size).apply(init_weights)
@@ -44,11 +41,13 @@ class ModelConfig:
 class DecoderLayer(nn.Module):
     def __init__(self, config: ModelConfig, rope_layer: RotaryPositionalEncoding) -> None:
         super().__init__()
-        self.attention = config.attention.build(config.d_model, rope_layer)
-        self.feedforward = config.feedforward.build(config.d_model)
+        self.attention = config.attention.build(d_model=config.d_model, rope_layer=rope_layer)
+        self.feedforward = config.feedforward.build(d_model=config.d_model)
         # A mixture of experts takes the padding mask and adds a load-balancing loss
         self.feedforward_has_aux = isinstance(self.feedforward, MixtureOfExpertsFeedForward)
-        self.layer_norms = nn.ModuleList([config.norm.build(config.d_model) for _ in range(0, 2)])
+        self.layer_norms = nn.ModuleList(
+            [config.norm.build(d_model=config.d_model) for _ in range(0, 2)]
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(
@@ -71,11 +70,13 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.rope_layer = config.position.build(config.attention.d_h, config.max_length)
+        self.rope_layer = config.position.build(
+            d_h=config.attention["d_h"], max_length=config.max_length
+        )
         self.decoder_layers = nn.ModuleList(
             [DecoderLayer(config, self.rope_layer) for _ in range(config.num_layers)]
         )
-        self.final_norm = config.norm.build(config.d_model)
+        self.final_norm = config.norm.build(d_model=config.d_model)
 
     def forward(
         self,
@@ -104,8 +105,8 @@ class Transformer(nn.Module):
         self.config = config
         # context bound: RoPE table size and training seq length
         self.max_length = config.max_length
-        self.num_kv_heads = config.attention.num_kv_heads
-        self.d_h = config.attention.d_h
+        self.num_kv_heads = config.attention["num_kv_heads"]
+        self.d_h = config.attention["d_h"]
         self.num_layers = config.num_layers
         self.embedding = Embedding(vocab_size, config.d_model)
         self.decoder = Decoder(config)
@@ -146,33 +147,3 @@ def init_weights(m: nn.Module) -> None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, (nn.Embedding, Embedding)):
         nn.init.normal_(m.E, mean=0.0, std=0.02)
-
-
-def upgrade_legacy(model: dict[str, Any]) -> dict[str, Any]:
-    """The `model` section in today's form, from a config saved before components were named.
-
-    Those configs listed flat sizes, and always meant RMSNorm, RoPE, grouped-query attention
-    and a mixture of SwiGLU experts.
-    """
-    return {
-        "type": "decoder_only",
-        "d_model": model["d_model"],
-        "num_layers": model["num_layers"],
-        "max_length": model["max_length"],
-        "dropout": model["dropout"],
-        "norm": {"type": "rms"},
-        "position": {"type": "rope"},
-        "attention": {
-            "type": "gqa",
-            "num_heads": model["num_heads"],
-            "num_kv_heads": model["num_kv_heads"],
-            "d_h": model["d_h"],
-        },
-        "feedforward": {
-            "type": "moe",
-            "d_ff": model["d_ff"],
-            "num_experts": model["num_experts"],
-            "top_k": model["top_k"],
-            "capacity_factor": model["capacity_factor"],
-        },
-    }

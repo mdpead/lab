@@ -1,11 +1,12 @@
-from dataclasses import dataclass
-
 import torch
 from torch import Tensor, nn
 
 from mlcore.config import Registry
 
+NORMS = Registry("norm", provided=("d_model",))
 
+
+@NORMS.register("rms")
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()
@@ -21,6 +22,7 @@ class RMSNorm(nn.Module):
         return out
 
 
+@NORMS.register("layer")
 class LayerNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()
@@ -33,30 +35,3 @@ class LayerNorm(nn.Module):
         # eps on the std, not the variance, as the encoder-decoder was trained with
         std = x.std(-1, keepdim=True, unbiased=False)
         return self.alpha * (x - mean) / (std + self.eps) + self.bias
-
-
-NORMS = Registry("norm")
-
-
-@dataclass(frozen=True, kw_only=True)
-class NormConfig:
-    """A normalisation layer over the model dimension."""
-
-    eps: float = 1e-6
-
-    def build(self, d_model: int) -> nn.Module:
-        raise NotImplementedError
-
-
-@NORMS.register("rms")
-@dataclass(frozen=True, kw_only=True)
-class RMSNormConfig(NormConfig):
-    def build(self, d_model: int) -> nn.Module:
-        return RMSNorm(d_model, self.eps)
-
-
-@NORMS.register("layer")
-@dataclass(frozen=True, kw_only=True)
-class LayerNormConfig(NormConfig):
-    def build(self, d_model: int) -> nn.Module:
-        return LayerNorm(d_model, self.eps)

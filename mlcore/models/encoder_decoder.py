@@ -5,22 +5,13 @@ breaks loading them.
 """
 
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated
 
 import torch
 from torch import Tensor, nn
 
-from mlcore.layers import (
-    ATTENTIONS,
-    FEEDFORWARDS,
-    NORMS,
-    POSITIONS,
-    DenseFeedForwardConfig,
-    Embedding,
-    MultiHeadAttentionConfig,
-    NormConfig,
-    SinusoidalConfig,
-)
+from mlcore.config import Component
+from mlcore.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS, Embedding
 from mlcore.models.registry import MODELS
 
 
@@ -37,16 +28,17 @@ class ModelConfig:
     num_dec_layers: int
     max_length: int
     dropout: float
-    norm: Annotated[NormConfig, NORMS]
-    position: Annotated[SinusoidalConfig, POSITIONS]
-    attention: Annotated[MultiHeadAttentionConfig, ATTENTIONS]
-    feedforward: Annotated[DenseFeedForwardConfig, FEEDFORWARDS]
+    norm: Annotated[Component, NORMS]
+    position: Annotated[Component, POSITIONS.only("sinusoidal")]
+    attention: Annotated[Component, ATTENTIONS.only("mha")]
+    # A mixture of experts returns an auxiliary loss, which this model has no place for
+    feedforward: Annotated[Component, FEEDFORWARDS.only("relu", "swiglu")]
 
     def __post_init__(self) -> None:
-        if self.d_model % self.attention.num_heads:
+        if self.d_model % self.attention["num_heads"]:
             raise ValueError(
                 f"d_model ({self.d_model}) must be a multiple of attention.num_heads "
-                f"({self.attention.num_heads})"
+                f"({self.attention['num_heads']})"
             )
 
     def build(self, vocab_size: int) -> "Transformer":
@@ -56,9 +48,11 @@ class ModelConfig:
 class EncoderLayer(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.attention = config.attention.build(config.d_model, config.dropout)
-        self.feedforward = config.feedforward.build(config.d_model)
-        self.layer_norms = nn.ModuleList([config.norm.build(config.d_model) for _ in range(0, 2)])
+        self.attention = config.attention.build(d_model=config.d_model, dropout=config.dropout)
+        self.feedforward = config.feedforward.build(d_model=config.d_model)
+        self.layer_norms = nn.ModuleList(
+            [config.norm.build(d_model=config.d_model) for _ in range(0, 2)]
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, src: Tensor, attn_mask: Tensor) -> Tensor:
@@ -89,10 +83,14 @@ class Encoder(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.self_attention = config.attention.build(config.d_model, config.dropout)
-        self.cross_attention = config.attention.build(config.d_model, config.dropout)
-        self.feedforward = config.feedforward.build(config.d_model)
-        self.layer_norms = nn.ModuleList([config.norm.build(config.d_model) for _ in range(0, 3)])
+        self.self_attention = config.attention.build(d_model=config.d_model, dropout=config.dropout)
+        self.cross_attention = config.attention.build(
+            d_model=config.d_model, dropout=config.dropout
+        )
+        self.feedforward = config.feedforward.build(d_model=config.d_model)
+        self.layer_norms = nn.ModuleList(
+            [config.norm.build(d_model=config.d_model) for _ in range(0, 3)]
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(
@@ -162,7 +160,9 @@ class Transformer(nn.Module):
         self.config = config
         self.src_embedding = Embedding(vocab_size, config.d_model)
         self.tgt_embedding = Embedding(vocab_size, config.d_model)
-        self.positional_encoder = config.position.build(config.d_model, config.max_length)
+        self.positional_encoder = config.position.build(
+            d_model=config.d_model, max_length=config.max_length
+        )
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
         self.output = Output(config.d_model, vocab_size)
@@ -204,23 +204,3 @@ def init_weights(m: nn.Module) -> None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, (nn.Embedding, Embedding)):
         nn.init.normal_(m.E, mean=0.0, std=0.02)
-
-
-def upgrade_legacy(model: dict[str, Any]) -> dict[str, Any]:
-    """The `model` section in today's form, from a config saved before components were named.
-
-    Those configs listed flat sizes, and always meant LayerNorm, sinusoidal positions,
-    multi-head attention and a ReLU feed-forward with biases.
-    """
-    return {
-        "type": "encoder_decoder",
-        "d_model": model["d_model"],
-        "num_enc_layers": model["num_enc_layers"],
-        "num_dec_layers": model["num_dec_layers"],
-        "max_length": model["max_length"],
-        "dropout": model["dropout"],
-        "norm": {"type": "layer"},
-        "position": {"type": "sinusoidal"},
-        "attention": {"type": "mha", "num_heads": model["num_heads"]},
-        "feedforward": {"type": "relu", "d_ff": model["d_ff"], "bias": True},
-    }

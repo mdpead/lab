@@ -9,12 +9,7 @@ import torch
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from mlcore.layers import (
-    GroupedQueryAttentionConfig,
-    MixtureOfExpertsConfig,
-    RMSNormConfig,
-    RotaryConfig,
-)
+from mlcore.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS
 from mlcore.models.decoder_only import ModelConfig, Transformer
 
 
@@ -94,12 +89,13 @@ def make_model():
             num_layers=num_layers,
             max_length=max_length,
             dropout=0.0,
-            norm=RMSNormConfig(),
-            position=RotaryConfig(),
-            attention=GroupedQueryAttentionConfig(
-                num_heads=num_heads, num_kv_heads=num_kv_heads, d_h=16
+            norm=NORMS.component("rms"),
+            position=POSITIONS.component("rope"),
+            attention=ATTENTIONS.component(
+                "gqa", num_heads=num_heads, num_kv_heads=num_kv_heads, d_h=16
             ),
-            feedforward=MixtureOfExpertsConfig(
+            feedforward=FEEDFORWARDS.component(
+                "moe",
                 d_ff=128,
                 num_experts=4,
                 top_k=2,

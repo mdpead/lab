@@ -3,7 +3,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from mlcore import runs, training
-from mlcore.models import encoder_decoder, parse_model, upgrade_legacy_model
+from mlcore.models import parse_model
 from mlcore.models.encoder_decoder import ModelConfig, Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
@@ -53,15 +53,27 @@ _FLAT_FIELDS = ("d_model", "num_heads", "d_ff", "num_enc_layers", "num_dec_layer
 
 def _model_config(flat: dict[str, Any]) -> ModelConfig:
     """The architecture the Hub format describes: the original one, with these sizes."""
-    return parse_model(encoder_decoder.upgrade_legacy(flat), ModelConfig)
+    model = {
+        "type": "encoder_decoder",
+        "d_model": flat["d_model"],
+        "num_enc_layers": flat["num_enc_layers"],
+        "num_dec_layers": flat["num_dec_layers"],
+        "max_length": flat["max_length"],
+        "dropout": flat["dropout"],
+        "norm": {"type": "layer"},
+        "position": {"type": "sinusoidal"},
+        "attention": {"type": "mha", "num_heads": flat["num_heads"]},
+        "feedforward": {"type": "relu", "d_ff": flat["d_ff"], "bias": True},
+    }
+    return parse_model(model, "encoder_decoder")
 
 
 def _flat_fields(model_config: ModelConfig) -> dict[str, Any]:
     """EnCyConfig's fields for a model config, which must be the architecture they imply."""
     flat = {
         "d_model": model_config.d_model,
-        "num_heads": model_config.attention.num_heads,
-        "d_ff": model_config.feedforward.d_ff,
+        "num_heads": model_config.attention["num_heads"],
+        "d_ff": model_config.feedforward["d_ff"],
         "num_enc_layers": model_config.num_enc_layers,
         "num_dec_layers": model_config.num_dec_layers,
         "max_length": model_config.max_length,
@@ -181,8 +193,7 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
     def from_run(cls, stage_path: str) -> "EnCyForTranslation":
         """Load the latest checkpoint of a training stage, e.g. models/base/translation."""
         config_dict = runs.load_config(stage_path)
-        # Runs saved before named components have a flat model section; upgrade either form
-        model_config = parse_model(upgrade_legacy_model(config_dict["model"]), ModelConfig)
+        model_config = parse_model(config_dict["model"], "encoder_decoder")
         hf_config = EnCyConfig(
             vocab_size=config_dict["tokenizer"]["vocab_size"], **_flat_fields(model_config)
         )

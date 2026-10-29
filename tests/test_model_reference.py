@@ -13,56 +13,60 @@ import torch
 
 from mlcore.config import ConfigError
 from mlcore.layers import MixtureOfExpertsFeedForward, SwiGLUFeedForward
-from mlcore.models import build_model, parse_model, upgrade_legacy_model
+from mlcore.models import build_model, parse_model
 
 REFERENCE = json.load(open("tests/fixtures/model_reference.json"))["tiny"]
 
-# The flat model sections the reference was built from, as configs used to list them
-FLAT = {
+# The models the reference was recorded from, as configs describe them now
+MODELS = {
     "decoder_only": (
-        dict(
-            d_model=64,
-            num_heads=4,
-            num_kv_heads=2,
-            d_h=16,
-            d_ff=128,
-            num_experts=4,
-            top_k=2,
-            capacity_factor=4.0,
-            num_layers=2,
-            max_length=64,
-            dropout=0.0,
-        ),
+        {
+            "type": "decoder_only",
+            "d_model": 64,
+            "num_layers": 2,
+            "max_length": 64,
+            "dropout": 0.0,
+            "norm": {"type": "rms"},
+            "position": {"type": "rope"},
+            "attention": {"type": "gqa", "num_heads": 4, "num_kv_heads": 2, "d_h": 16},
+            "feedforward": {
+                "type": "moe",
+                "d_ff": 128,
+                "num_experts": 4,
+                "top_k": 2,
+                "capacity_factor": 4.0,
+            },
+        },
         100,
     ),
     "encoder_decoder": (
-        dict(
-            d_model=32,
-            num_heads=4,
-            d_ff=64,
-            num_enc_layers=2,
-            num_dec_layers=2,
-            max_length=32,
-            dropout=0.1,
-        ),
+        {
+            "type": "encoder_decoder",
+            "d_model": 32,
+            "num_enc_layers": 2,
+            "num_dec_layers": 2,
+            "max_length": 32,
+            "dropout": 0.1,
+            "norm": {"type": "layer"},
+            "position": {"type": "sinusoidal"},
+            "attention": {"type": "mha", "num_heads": 4},
+            "feedforward": {"type": "relu", "d_ff": 64, "bias": True},
+        },
         200,
     ),
 }
 
 
 def _config(family, **changes):
-    flat, vocab_size = FLAT[family]
-    return {
-        "model": {**upgrade_legacy_model(flat), **changes},
-        "tokenizer": {"vocab_size": vocab_size},
-    }
+    model, vocab_size = MODELS[family]
+    return {"model": {**model, **changes}, "tokenizer": {"vocab_size": vocab_size}}
 
 
 def _hash(tensor):
     return hashlib.sha256(tensor.detach().cpu().contiguous().numpy().tobytes()).hexdigest()[:16]
 
 
-@pytest.mark.parametrize("family", sorted(FLAT))
+@pytest.mark.parametrize("family", sorted(MODELS))
 def test_seeded_model_matches_the_reference_weight_for_weight(family):
     torch.manual_seed(0)
     state = build_model(_config(family)).state_dict()

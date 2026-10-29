@@ -158,30 +158,24 @@ def test_writing_out_a_default_does_not_clear_the_stage(config):
     assert not os.path.exists(marker)
 
 
-def test_a_saved_config_that_no_longer_parses_clears_the_stage(config):
+def test_a_saved_config_that_does_not_parse_stops_the_run_and_keeps_the_stage(config):
+    """Checkpoints are not deleted on the strength of a config that cannot be read."""
     stage_path, marker = _init_with_marker(config)
 
     saved = runs.load_config(stage_path)
     saved["stages"][STAGE]["train"]["learning_rate"] = "fast"
     runs.save_config(stage_path, saved)
-    runs.init_run(config, STAGE, Schema)
-    assert not os.path.exists(marker)
+    with pytest.raises(ConfigError, match=r"does not match the current config schema"):
+        runs.init_run(config, STAGE, Schema)
+    assert os.path.exists(marker)
 
 
-def test_upgrade_legacy_config_moves_stages_and_keeps_the_source_stage():
-    current = {"stages": {"sft": {"train": {}, "init_from": {"stage": "pretrain"}}}}
-    saved = {
-        "name": "t",
-        "model": {"type": "decoder_only"},
-        "train": {"sft": {"learning_rate": 1e-3, "init_from_step": 200}, "pretrain": {}},
-        "data": {"sft": {"tier": "easy"}},
-    }
-    upgraded = runs.upgrade_legacy_config(saved, current)
-    assert "train" not in upgraded and "data" not in upgraded
-    assert upgraded["stages"]["sft"] == {
-        "train": {"learning_rate": 1e-3},
-        "data": {"tier": "easy"},
-        "init_from": {"stage": "pretrain", "step": 200},
-    }
-    assert upgraded["stages"]["pretrain"] == {"train": {}}
-    assert saved["train"]["sft"]["init_from_step"] == 200, "the saved config is not modified"
+def test_a_saved_config_in_an_old_layout_stops_the_run(config):
+    stage_path, marker = _init_with_marker(config)
+
+    saved = runs.load_config(stage_path)
+    saved["train"] = {STAGE: saved.pop("stages")[STAGE]["train"]}
+    runs.save_config(stage_path, saved)
+    with pytest.raises(ConfigError, match=r"missing required key 'stages'.*migrate it"):
+        runs.init_run(config, STAGE, Schema)
+    assert os.path.exists(marker)

@@ -1,0 +1,13 @@
+{
+ "_about": "Parameter count and a hash of the parameter names and shapes for each config's model, recorded from the code before models were built from named components.",
+ "models": {
+  "base.yaml": {
+   "count": 68730496,
+   "layout_sha": "84b3cb27d11818d0"
+  },
+  "test.yaml": {
+   "count": 82775680,
+   "layout_sha": "93948893b08f7c30"
+  }
+ }
+}

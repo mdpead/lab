@@ -1,12 +1,21 @@
 """Checking configs against their schemas: types, missing and unknown keys, resumable fields."""
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
 import pytest
 import yaml
 
-from mlcore.config import ConfigError, field_type, parse, resumable, resumable_keys, stage_class
+from mlcore.config import (
+    Component,
+    ConfigError,
+    Registry,
+    field_type,
+    parse,
+    resumable,
+    resumable_keys,
+    stage_class,
+)
 from mlcore.training import StageConfig, SupervisedStage, TrainStage
 
 
@@ -145,3 +154,82 @@ def test_train_stage_resumable_keys():
         "cache_clear_steps",
         "compile_model",
     }
+
+
+# --- components checked against their constructors ---
+
+THINGS = Registry("thing", provided=("d_model",))
+
+
+@THINGS.register("plain")
+class _Plain:
+    def __init__(self, d_model: int, width: int, scale: float = 0.5) -> None:
+        self.d_model, self.width, self.scale = d_model, width, scale
+
+
+@THINGS.register("checked")
+class _Checked:
+    def __init__(self, d_model: int, low: int, high: int) -> None:
+        self.low, self.high = low, high
+
+    @staticmethod
+    def check_config(low: int, high: int) -> None:
+        if low > high:
+            raise ValueError(f"low ({low}) must not exceed high ({high})")
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Holder:
+    thing: Annotated[Component, THINGS]
+    plain_only: Annotated[Component, THINGS.only("plain")] | None = None
+
+
+def test_component_settings_come_from_the_constructor_with_its_defaults():
+    holder = parse(_Holder, {"thing": {"type": "plain", "width": 3}})
+    assert holder.thing == Component("plain", _Plain, {"width": 3, "scale": 0.5})
+    built = holder.thing.build(d_model=8, unused=1)
+    assert (built.d_model, built.width, built.scale) == (8, 3, 0.5)
+
+
+def test_an_explicit_default_is_the_same_component():
+    explicit = parse(_Holder, {"thing": {"type": "plain", "width": 3, "scale": 0.5}})
+    assert explicit == parse(_Holder, {"thing": {"type": "plain", "width": 3}})
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        (
+            {"type": "plain", "widht": 3},
+            r"unknown key 'widht' for thing 'plain'; did you mean 'width'",
+        ),
+        ({"type": "plain", "width": 3, "d_model": 8}, r"'d_model' is set by the model"),
+        ({"type": "plain"}, r"thing: missing required key 'width'"),
+        ({"type": "plain", "width": 2.5}, r"thing\.width: expected an integer"),
+        ({"type": "plian", "width": 3}, r"unknown thing type 'plian'; did you mean 'plain'"),
+        ({"type": "checked", "low": 3, "high": 1}, r"thing: low \(3\) must not exceed high \(1\)"),
+    ],
+)
+def test_component_blocks_are_checked_when_the_config_loads(block, message):
+    with pytest.raises(ConfigError, match=message):
+        parse(_Holder, {"thing": block})
+
+
+def test_only_restricts_a_field_to_some_names():
+    data = {
+        "thing": {"type": "plain", "width": 1},
+        "plain_only": {"type": "checked", "low": 1, "high": 2},
+    }
+    with pytest.raises(
+        ConfigError,
+        match=r"plain_only: thing type 'checked' is not supported here \(one of: plain\)",
+    ):
+        parse(_Holder, data)
+
+
+def test_component_builds_a_component_in_code():
+    assert THINGS.component("plain", width=4) == Component(
+        "plain", _Plain, {"width": 4, "scale": 0.5}
+    )
+    with pytest.raises(ConfigError, match="missing required key 'width'"):
+        THINGS.component("plain")

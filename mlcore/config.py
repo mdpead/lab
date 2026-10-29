@@ -6,13 +6,15 @@ fails on the first problem, naming its path: a misspelt or unknown key, a missin
 a value of the wrong type. Fields that can change without invalidating a stage's checkpoints
 are marked with `resumable()`, and the stage fingerprint in `mlcore.runs` reads that mark.
 
-Swappable components come from a `Registry`. A field annotated `Annotated[Base, REGISTRY]`
-takes a block like `{type: rms, eps: 1.0e-6}`: `type` picks a registered config class, which
-must subclass `Base`, and the rest of the block is checked against it.
+Swappable components come from a `Registry`. A field annotated `Annotated[T, REGISTRY]` takes a
+block like `{type: rms, eps: 1.0e-6}`: `type` picks a registered class, and the rest of the
+block is checked against it. A layer class is checked against its own constructor, so its
+settings are written down once. `REGISTRY.only(...)` narrows which names a field accepts.
 """
 
 import dataclasses
 import difflib
+import inspect
 import types
 import typing
 from collections.abc import Callable
@@ -39,16 +41,22 @@ def resumable_keys(cls: type) -> frozenset[str]:
 
 
 class Registry:
-    """Named implementations of one kind of component, each described by a config dataclass."""
+    """Named implementations of one kind of component.
 
-    def __init__(self, kind: str) -> None:
+    An entry is either a config dataclass, checked field by field, or a class such as a layer,
+    checked against its constructor: the arguments the model passes in (`provided`) are left
+    out, and the rest are the block's settings, with the constructor's defaults and type hints.
+    A class may define `check_config(**settings)`, raising ValueError, for checks across
+    settings that should fail when the config loads rather than when the model is built.
+    """
+
+    def __init__(self, kind: str, provided: tuple[str, ...] = ()) -> None:
         self.kind = kind
+        self.provided = frozenset(provided)
         self._classes: dict[str, type] = {}
 
     def register[T: type](self, name: str) -> Callable[[T], T]:
         def decorator(cls: T) -> T:
-            if not dataclasses.is_dataclass(cls):
-                raise TypeError(f"{cls.__name__} must be a dataclass to register as a {self.kind}")
             if name in self._classes:
                 raise ValueError(f"{self.kind} {name!r} is already registered")
             self._classes[name] = cls
@@ -56,15 +64,45 @@ class Registry:
 
         return decorator
 
-    def names(self, base: type = object) -> list[str]:
-        """Registered names whose config classes subclass `base`."""
-        return [name for name, cls in self._classes.items() if issubclass(cls, base)]
+    def names(self) -> list[str]:
+        return list(self._classes)
 
     def get(self, name: str) -> type:
         return self._classes[name]
 
-    def name_of(self, cls: type) -> str:
-        return next(name for name, c in self._classes.items() if c is cls)
+    def only(self, *names: str) -> "Only":
+        """This registry, restricted to `names`, for a field that accepts only some of them."""
+        unknown = set(names) - set(self._classes)
+        if unknown:
+            raise ValueError(f"no {self.kind} registered as {sorted(unknown)}")
+        return Only(self, names)
+
+    def component(self, name: str, **settings: Any) -> Any:
+        """The parsed form of `{type: name, **settings}`, for building configs in code."""
+        return _convert_registered(self, self.names(), {"type": name, **settings}, self.kind)
+
+
+@dataclasses.dataclass(frozen=True)
+class Only:
+    registry: Registry
+    names: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class Component:
+    """A component a config chose: its registered class and its checked settings."""
+
+    name: str
+    cls: type
+    settings: dict[str, Any]
+
+    def build(self, **provided: Any) -> Any:
+        """Construct it, passing each of `provided` that its constructor takes."""
+        accepted = inspect.signature(self.cls).parameters
+        return self.cls(**{k: v for k, v in provided.items() if k in accepted}, **self.settings)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.settings[key]
 
 
 def field_type(cls: type, name: str) -> type:
@@ -153,10 +191,12 @@ def _convert(hint: Any, value: Any, path: str) -> Any:
     args = typing.get_args(hint)
 
     if origin is Annotated:
-        registry = next((m for m in hint.__metadata__ if isinstance(m, Registry)), None)
-        if registry is None:
-            return _convert(args[0], value, path)
-        return _convert_registered(args[0], registry, value, path)
+        for meta in hint.__metadata__:
+            if isinstance(meta, Registry):
+                return _convert_registered(meta, meta.names(), value, path)
+            if isinstance(meta, Only):
+                return _convert_registered(meta.registry, list(meta.names), value, path)
+        return _convert(args[0], value, path)
     if hint is Any:
         return value
     if hint is type(None):
@@ -256,8 +296,7 @@ def _convert_dataclass(cls: type, value: Any, path: str) -> Any:
         raise ConfigError(f"{_where(path)}: {e}") from e
 
 
-def _convert_registered(base: type, registry: Registry, value: Any, path: str) -> Any:
-    allowed = registry.names(base)
+def _convert_registered(registry: Registry, allowed: list[str], value: Any, path: str) -> Any:
     options = ", ".join(allowed)
     if not isinstance(value, dict):
         raise ConfigError(
@@ -279,5 +318,49 @@ def _convert_registered(base: type, registry: Registry, value: Any, path: str) -
             f"{_where(path)}: unknown {registry.kind} type {name!r}{suggestion} (one of: {options})"
         )
 
+    cls = registry.get(name)
     settings = {k: v for k, v in value.items() if k != "type"}
-    return _convert_dataclass(registry.get(name), settings, path)
+    if dataclasses.is_dataclass(cls):
+        return _convert_dataclass(cls, settings, path)
+    return _convert_component(registry, name, cls, settings, path)
+
+
+def _convert_component(
+    registry: Registry, name: str, cls: type, settings: dict[str, Any], path: str
+) -> Component:
+    """Check a component block against its class's constructor."""
+    hints = typing.get_type_hints(cls.__init__)
+    params = {
+        p.name: p
+        for p in inspect.signature(cls).parameters.values()
+        if p.name not in registry.provided
+        and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    for key in settings:
+        if key in registry.provided:
+            raise ConfigError(f"{_where(path)}: {key!r} is set by the model, not in the config")
+        if key not in params:
+            close = difflib.get_close_matches(str(key), params, n=1)
+            suggestion = f"; did you mean {close[0]!r}?" if close else ""
+            valid = ", ".join(params) or "none"
+            raise ConfigError(
+                f"{_where(path)}: unknown key {key!r} for {registry.kind} {name!r}{suggestion} "
+                f"(valid keys: {valid})"
+            )
+
+    checked = {}
+    for key, param in params.items():
+        if key in settings:
+            checked[key] = _convert(hints[key], settings[key], _join(path, key))
+        elif param.default is inspect.Parameter.empty:
+            raise ConfigError(f"{_where(path)}: missing required key {key!r}")
+        else:
+            checked[key] = param.default
+
+    check = getattr(cls, "check_config", None)
+    if check is not None:
+        try:
+            check(**checked)
+        except ValueError as e:
+            raise ConfigError(f"{_where(path)}: {e}") from e
+    return Component(name, cls, checked)

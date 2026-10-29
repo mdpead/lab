@@ -169,27 +169,6 @@ def _save_run(config, transformer, tok):
     return stage_path
 
 
-def test_from_run_loads_a_run_saved_with_the_flat_model_section(config, transformer, tok):
-    """Runs saved before named components list flat sizes in their model section."""
-    stage_path = _save_run(config, transformer, tok)
-    saved = runs.load_config(stage_path)
-    saved["model"] = {
-        "d_model": 32,
-        "num_heads": 4,
-        "d_ff": 64,
-        "num_enc_layers": 2,
-        "num_dec_layers": 2,
-        "max_length": 32,
-        "dropout": 0.1,
-    }
-    runs.save_config(stage_path, saved)
-
-    hf_model = EnCyForTranslation.from_run(stage_path)
-
-    for key, value in transformer.state_dict().items():
-        assert torch.equal(hf_model.transformer.state_dict()[key], value)
-
-
 def test_from_run_refuses_an_architecture_the_hub_format_cannot_describe(config, tok):
     config["model"]["feedforward"] = {"type": "swiglu", "d_ff": 64}
     stage_path = _save_run(config, build_model(config), tok)

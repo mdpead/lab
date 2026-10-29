@@ -1,12 +1,13 @@
-from dataclasses import dataclass
-
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
 from mlcore.config import Registry
 
+FEEDFORWARDS = Registry("feedforward", provided=("d_model",))
 
+
+@FEEDFORWARDS.register("relu")
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, d_model: int, d_ff: int, bias: bool = False) -> None:
         super().__init__()
@@ -21,6 +22,7 @@ class PositionWiseFeedForward(nn.Module):
         return x
 
 
+@FEEDFORWARDS.register("swiglu")
 class SwiGLUFeedForward(nn.Module):
     def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
@@ -36,11 +38,13 @@ class SwiGLUFeedForward(nn.Module):
         return o
 
 
+@FEEDFORWARDS.register("moe")
 class MixtureOfExpertsFeedForward(nn.Module):
     def __init__(
         self, d_model: int, d_ff: int, num_experts: int, top_k: int, capacity_factor: float
     ) -> None:
         super().__init__()
+        self.check_config(num_experts=num_experts, top_k=top_k)
         self.num_experts = num_experts
         self.top_k = top_k
         # Rows per expert, as a multiple of its balanced share. Above 1.0 absorbs router
@@ -50,6 +54,11 @@ class MixtureOfExpertsFeedForward(nn.Module):
         self.experts = nn.ModuleList(
             [SwiGLUFeedForward(d_model, d_ff) for _ in range(0, num_experts)]
         )
+
+    @staticmethod
+    def check_config(num_experts: int, top_k: int, **_: object) -> None:
+        if not 1 <= top_k <= num_experts:
+            raise ValueError(f"top_k ({top_k}) must be between 1 and num_experts ({num_experts})")
 
     def forward(self, x: Tensor, padding_mask: Tensor | None = None) -> tuple[Tensor, Tensor]:
 
@@ -124,56 +133,3 @@ class MixtureOfExpertsFeedForward(nn.Module):
         loss_aux = self.num_experts * (expert_fracs * expert_probs).sum()
 
         return out.reshape(x.shape), loss_aux
-
-
-FEEDFORWARDS = Registry("feedforward")
-
-
-@dataclass(frozen=True, kw_only=True)
-class FeedForwardConfig:
-    """A feed-forward block applied to each position."""
-
-    d_ff: int
-
-    def build(self, d_model: int) -> nn.Module:
-        raise NotImplementedError
-
-
-@dataclass(frozen=True, kw_only=True)
-class DenseFeedForwardConfig(FeedForwardConfig):
-    """A feed-forward block that returns just its output, with no auxiliary loss."""
-
-
-@FEEDFORWARDS.register("relu")
-@dataclass(frozen=True, kw_only=True)
-class ReLUFeedForwardConfig(DenseFeedForwardConfig):
-    bias: bool = False
-
-    def build(self, d_model: int) -> nn.Module:
-        return PositionWiseFeedForward(d_model, self.d_ff, bias=self.bias)
-
-
-@FEEDFORWARDS.register("swiglu")
-@dataclass(frozen=True, kw_only=True)
-class SwiGLUFeedForwardConfig(DenseFeedForwardConfig):
-    def build(self, d_model: int) -> nn.Module:
-        return SwiGLUFeedForward(d_model, self.d_ff)
-
-
-@FEEDFORWARDS.register("moe")
-@dataclass(frozen=True, kw_only=True)
-class MixtureOfExpertsConfig(FeedForwardConfig):
-    """SwiGLU experts with top-k routing. Returns its output and a load-balancing loss."""
-
-    num_experts: int
-    top_k: int
-    capacity_factor: float
-
-    def __post_init__(self) -> None:
-        if not 1 <= self.top_k <= self.num_experts:
-            raise ValueError(f"top_k ({self.top_k}) must be between 1 and num_experts")
-
-    def build(self, d_model: int) -> nn.Module:
-        return MixtureOfExpertsFeedForward(
-            d_model, self.d_ff, self.num_experts, self.top_k, self.capacity_factor
-        )
