@@ -3,10 +3,14 @@ import math
 import torch
 from torch import Tensor, nn
 
+from mlcore.config import Registry
 from mlcore.kernels import flash_attention
 from mlcore.layers.position import RotaryPositionalEncoding
 
+ATTENTIONS = Registry("attention", provided=("d_model", "rope_layer", "dropout"))
 
+
+@ATTENTIONS.register("gqa")
 class GroupedQueryAttention(nn.Module):
     def __init__(
         self,
@@ -17,7 +21,7 @@ class GroupedQueryAttention(nn.Module):
         rope_layer: "RotaryPositionalEncoding",
     ) -> None:
         super().__init__()
-        assert num_heads % num_kv_heads == 0
+        self.check_config(num_heads=num_heads, num_kv_heads=num_kv_heads)
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.d_h = d_h
@@ -25,6 +29,13 @@ class GroupedQueryAttention(nn.Module):
         self.o_proj = nn.Linear(num_heads * d_h, d_model, bias=False)
 
         self.rope = rope_layer
+
+    @staticmethod
+    def check_config(num_heads: int, num_kv_heads: int, **_: object) -> None:
+        if num_heads % num_kv_heads:
+            raise ValueError(
+                f"num_heads ({num_heads}) must be a multiple of num_kv_heads ({num_kv_heads})"
+            )
 
     def forward(
         self, x: Tensor, seq_starts: Tensor, kv_cache: Tensor | None = None
@@ -73,6 +84,7 @@ class GroupedQueryAttention(nn.Module):
         return O, kv_new
 
 
+@ATTENTIONS.register("mha")
 class MultiHeadAttention(nn.Module):
     """Plain multi-head attention with an explicit boolean mask, for self- and cross-attention.
 

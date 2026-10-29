@@ -2,7 +2,7 @@ import copy
 
 import pytest
 import torch
-from mlcore.models import encoder_decoder
+from mlcore.models import build_model
 
 from datasets import Dataset, DatasetDict
 from src import tokenizer
@@ -23,32 +23,37 @@ BASE_CONFIG = {
     "name": "pytest",
     "seed": 0,
     "model": {
+        "type": "encoder_decoder",
         "d_model": 32,
-        "num_heads": 4,
-        "max_length": 32,
-        "d_ff": 64,
         "num_enc_layers": 2,
         "num_dec_layers": 2,
+        "max_length": 32,
         "dropout": 0.1,
+        "norm": {"type": "layer"},
+        "position": {"type": "sinusoidal"},
+        "attention": {"type": "mha", "num_heads": 4},
+        "feedforward": {"type": "relu", "d_ff": 64, "bias": True},
     },
-    "train": {
+    "stages": {
         STAGE: {
-            "effective_batch_token_size": 40,
-            "minibatch_token_size": 20,
-            "learning_rate": 1.0e-3,
-            "adam_betas": [0.9, 0.98],
-            "adam_eps": 1.0e-9,
-            "num_steps": 4,
-            "label_smoothing": 0.1,
-            "device": "cpu",
-            "checkpoint_steps": 2,
-            "warm_up_steps": 2,
-            "validation_steps": 2,
-            "validation_batches": 1,
-            "compile_model": False,
+            "train": {
+                "effective_batch_token_size": 40,
+                "minibatch_token_size": 20,
+                "learning_rate": 1.0e-3,
+                "adam_betas": [0.9, 0.98],
+                "adam_eps": 1.0e-9,
+                "num_steps": 4,
+                "label_smoothing": 0.1,
+                "device": "cpu",
+                "checkpoint_steps": 2,
+                "warm_up_steps": 2,
+                "validation_steps": 2,
+                "validation_batches": 1,
+                "compile_model": False,
+            },
+            "data": {"ds": "techiaith/cardiff-university-tm-en-cy", "test_split_ratio": 0.25},
         },
     },
-    "data": {STAGE: {"ds": "techiaith/cardiff-university-tm-en-cy", "test_split_ratio": 0.25}},
     "tokenizer": {"vocab_size": 200, "pad_token_id": 2, "training_size": 1000},
     "locations": {"data_dir": "./data", "models_dir": "./models"},
 }
@@ -91,4 +96,4 @@ def ds_tokenized(raw_ds, tok, config):
 def transformer(config, tok):
     torch.manual_seed(0)
     config["tokenizer"]["vocab_size"] = len(tok)
-    return encoder_decoder.build_transformer(config)
+    return build_model(config)

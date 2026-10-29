@@ -3,7 +3,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 from mlcore import runs, training
-from mlcore.models.encoder_decoder import Transformer
+from mlcore.models import parse_model
+from mlcore.models.encoder_decoder import ModelConfig, Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 
@@ -46,6 +47,47 @@ class EnCyConfig(PretrainedConfig):
         self.dropout = dropout
 
 
+# EnCyConfig's flat fields, which are what the Hub stores
+_FLAT_FIELDS = ("d_model", "num_heads", "d_ff", "num_enc_layers", "num_dec_layers", "max_length")
+
+
+def _model_config(flat: dict[str, Any]) -> ModelConfig:
+    """The architecture the Hub format describes: the original one, with these sizes."""
+    model = {
+        "type": "encoder_decoder",
+        "d_model": flat["d_model"],
+        "num_enc_layers": flat["num_enc_layers"],
+        "num_dec_layers": flat["num_dec_layers"],
+        "max_length": flat["max_length"],
+        "dropout": flat["dropout"],
+        "norm": {"type": "layer"},
+        "position": {"type": "sinusoidal"},
+        "attention": {"type": "mha", "num_heads": flat["num_heads"]},
+        "feedforward": {"type": "relu", "d_ff": flat["d_ff"], "bias": True},
+    }
+    return parse_model(model, "encoder_decoder")
+
+
+def _flat_fields(model_config: ModelConfig) -> dict[str, Any]:
+    """EnCyConfig's fields for a model config, which must be the architecture they imply."""
+    flat = {
+        "d_model": model_config.d_model,
+        "num_heads": model_config.attention["num_heads"],
+        "d_ff": model_config.feedforward["d_ff"],
+        "num_enc_layers": model_config.num_enc_layers,
+        "num_dec_layers": model_config.num_dec_layers,
+        "max_length": model_config.max_length,
+        "dropout": model_config.dropout,
+    }
+    if _model_config(flat) != model_config:
+        raise ValueError(
+            "EnCyForTranslation describes only the original architecture (LayerNorm, "
+            "sinusoidal positions, multi-head attention, ReLU feed-forward with biases); "
+            f"this run's model is {model_config}"
+        )
+    return flat
+
+
 class _EncoderWrapper(torch.nn.Module):
     """Wrapper around transformer.encode() returning BaseModelOutput."""
 
@@ -72,16 +114,8 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
 
     def __init__(self, config: EnCyConfig) -> None:
         super().__init__(config)
-        self.transformer = Transformer(
-            d_model=config.d_model,
-            num_heads=config.num_heads,
-            d_ff=config.d_ff,
-            num_enc_layers=config.num_enc_layers,
-            num_dec_layers=config.num_dec_layers,
-            vocab_size=config.vocab_size,
-            max_length=config.max_length,
-            dropout=config.dropout,
-        )
+        flat = {name: getattr(config, name) for name in (*_FLAT_FIELDS, "dropout")}
+        self.transformer = Transformer(_model_config(flat), config.vocab_size)
         self.post_init()
 
     def get_encoder(self) -> _EncoderWrapper:
@@ -159,16 +193,9 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
     def from_run(cls, stage_path: str) -> "EnCyForTranslation":
         """Load the latest checkpoint of a training stage, e.g. models/base/translation."""
         config_dict = runs.load_config(stage_path)
-        model_cfg = config_dict["model"]
+        model_config = parse_model(config_dict["model"], "encoder_decoder")
         hf_config = EnCyConfig(
-            vocab_size=config_dict["tokenizer"]["vocab_size"],
-            d_model=model_cfg["d_model"],
-            num_heads=model_cfg["num_heads"],
-            d_ff=model_cfg["d_ff"],
-            num_enc_layers=model_cfg["num_enc_layers"],
-            num_dec_layers=model_cfg["num_dec_layers"],
-            max_length=model_cfg["max_length"],
-            dropout=model_cfg["dropout"],
+            vocab_size=config_dict["tokenizer"]["vocab_size"], **_flat_fields(model_config)
         )
         model = cls(hf_config)
         steps = training.checkpoint_steps_on_disk(f"{stage_path}/checkpoints")

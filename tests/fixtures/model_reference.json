@@ -1,0 +1,585 @@
+{
+ "tiny": {
+  "decoder_only": {
+   "count": 228416,
+   "hashes": {
+    "decoder.decoder_layers.0.attention.o_proj.weight": "5de7e56f08e9c1b2",
+    "decoder.decoder_layers.0.attention.qkv_proj.weight": "125e7558b80d1e75",
+    "decoder.decoder_layers.0.feedforward.experts.0.down.weight": "b7612e27da5389bf",
+    "decoder.decoder_layers.0.feedforward.experts.0.gate.weight": "aa2845bac76ecb09",
+    "decoder.decoder_layers.0.feedforward.experts.0.up.weight": "259ee0cecccf1dd8",
+    "decoder.decoder_layers.0.feedforward.experts.1.down.weight": "f25c5a78efefecc0",
+    "decoder.decoder_layers.0.feedforward.experts.1.gate.weight": "9065fe617231977a",
+    "decoder.decoder_layers.0.feedforward.experts.1.up.weight": "da9eca680e17ce34",
+    "decoder.decoder_layers.0.feedforward.experts.2.down.weight": "61030730eeefca50",
+    "decoder.decoder_layers.0.feedforward.experts.2.gate.weight": "4319558d519343ee",
+    "decoder.decoder_layers.0.feedforward.experts.2.up.weight": "922bde84f6cbe138",
+    "decoder.decoder_layers.0.feedforward.experts.3.down.weight": "c03ed2110945f6d9",
+    "decoder.decoder_layers.0.feedforward.experts.3.gate.weight": "2f85d7a400a5ffcc",
+    "decoder.decoder_layers.0.feedforward.experts.3.up.weight": "6411518f92586124",
+    "decoder.decoder_layers.0.feedforward.router.weight": "332cedfee2ef7c65",
+    "decoder.decoder_layers.0.layer_norms.0.alpha": "2f20cd03c9cd392a",
+    "decoder.decoder_layers.0.layer_norms.1.alpha": "2f20cd03c9cd392a",
+    "decoder.decoder_layers.1.attention.o_proj.weight": "1b1254483a268bae",
+    "decoder.decoder_layers.1.attention.qkv_proj.weight": "bd783ccf736944d5",
+    "decoder.decoder_layers.1.feedforward.experts.0.down.weight": "96d62806a65fb996",
+    "decoder.decoder_layers.1.feedforward.experts.0.gate.weight": "559195c0c75eb6d4",
+    "decoder.decoder_layers.1.feedforward.experts.0.up.weight": "ce44e83fc83571b5",
+    "decoder.decoder_layers.1.feedforward.experts.1.down.weight": "5c09f009032eb2ca",
+    "decoder.decoder_layers.1.feedforward.experts.1.gate.weight": "2f5d5478a09833c7",
+    "decoder.decoder_layers.1.feedforward.experts.1.up.weight": "4eddb7b97d4310c3",
+    "decoder.decoder_layers.1.feedforward.experts.2.down.weight": "f0c5241c05b3488e",
+    "decoder.decoder_layers.1.feedforward.experts.2.gate.weight": "1979c2737f4d96b3",
+    "decoder.decoder_layers.1.feedforward.experts.2.up.weight": "d9c796ba599fce26",
+    "decoder.decoder_layers.1.feedforward.experts.3.down.weight": "95e548e32236e364",
+    "decoder.decoder_layers.1.feedforward.experts.3.gate.weight": "ba428fbbf32477a2",
+    "decoder.decoder_layers.1.feedforward.experts.3.up.weight": "be95bd6a937f7bf5",
+    "decoder.decoder_layers.1.feedforward.router.weight": "ac182b210600ef49",
+    "decoder.decoder_layers.1.layer_norms.0.alpha": "2f20cd03c9cd392a",
+    "decoder.decoder_layers.1.layer_norms.1.alpha": "2f20cd03c9cd392a",
+    "decoder.final_norm.alpha": "2f20cd03c9cd392a",
+    "embedding.E": "12fac0db4bb1255c"
+   },
+   "params": {
+    "decoder.decoder_layers.0.attention.o_proj.weight": [
+     64,
+     64
+    ],
+    "decoder.decoder_layers.0.attention.qkv_proj.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.0.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.0.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.0.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.1.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.1.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.1.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.2.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.2.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.2.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.3.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.3.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.experts.3.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.0.feedforward.router.weight": [
+     4,
+     64
+    ],
+    "decoder.decoder_layers.0.layer_norms.0.alpha": [
+     64
+    ],
+    "decoder.decoder_layers.0.layer_norms.1.alpha": [
+     64
+    ],
+    "decoder.decoder_layers.1.attention.o_proj.weight": [
+     64,
+     64
+    ],
+    "decoder.decoder_layers.1.attention.qkv_proj.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.0.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.0.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.0.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.1.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.1.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.1.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.2.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.2.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.2.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.3.down.weight": [
+     64,
+     128
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.3.gate.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.experts.3.up.weight": [
+     128,
+     64
+    ],
+    "decoder.decoder_layers.1.feedforward.router.weight": [
+     4,
+     64
+    ],
+    "decoder.decoder_layers.1.layer_norms.0.alpha": [
+     64
+    ],
+    "decoder.decoder_layers.1.layer_norms.1.alpha": [
+     64
+    ],
+    "decoder.final_norm.alpha": [
+     64
+    ],
+    "embedding.E": [
+     100,
+     64
+    ]
+   }
+  },
+  "encoder_decoder": {
+   "count": 62152,
+   "hashes": {
+    "decoder.layers.0.cross_attention.W_k.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.cross_attention.W_k.weight": "76fb4efaf0673b28",
+    "decoder.layers.0.cross_attention.W_o.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.cross_attention.W_o.weight": "4a4376a06394c09f",
+    "decoder.layers.0.cross_attention.W_q.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.cross_attention.W_q.weight": "6df1a3cf02ea68ff",
+    "decoder.layers.0.cross_attention.W_v.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.cross_attention.W_v.weight": "968cdf79d4de0d04",
+    "decoder.layers.0.feedforward.linear1.bias": "5341e6b2646979a7",
+    "decoder.layers.0.feedforward.linear1.weight": "95e8fb24b9328978",
+    "decoder.layers.0.feedforward.linear2.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.feedforward.linear2.weight": "5f542dcd4e908aad",
+    "decoder.layers.0.layer_norms.0.alpha": "b638277a8690e175",
+    "decoder.layers.0.layer_norms.0.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.layer_norms.1.alpha": "b638277a8690e175",
+    "decoder.layers.0.layer_norms.1.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.layer_norms.2.alpha": "b638277a8690e175",
+    "decoder.layers.0.layer_norms.2.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.self_attention.W_k.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.self_attention.W_k.weight": "08401abd1630bb69",
+    "decoder.layers.0.self_attention.W_o.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.self_attention.W_o.weight": "59e14243e645d6a1",
+    "decoder.layers.0.self_attention.W_q.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.self_attention.W_q.weight": "83dc817af8e7e9ef",
+    "decoder.layers.0.self_attention.W_v.bias": "38723a2e5e8a17aa",
+    "decoder.layers.0.self_attention.W_v.weight": "7a0fb7195b31917e",
+    "decoder.layers.1.cross_attention.W_k.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.cross_attention.W_k.weight": "ce56a3c874bb858c",
+    "decoder.layers.1.cross_attention.W_o.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.cross_attention.W_o.weight": "b767914a3040c7db",
+    "decoder.layers.1.cross_attention.W_q.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.cross_attention.W_q.weight": "62513368fb836625",
+    "decoder.layers.1.cross_attention.W_v.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.cross_attention.W_v.weight": "1495747fe17bb54a",
+    "decoder.layers.1.feedforward.linear1.bias": "5341e6b2646979a7",
+    "decoder.layers.1.feedforward.linear1.weight": "e9887c1ca3aab301",
+    "decoder.layers.1.feedforward.linear2.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.feedforward.linear2.weight": "68b4b2f6cf6ebf5b",
+    "decoder.layers.1.layer_norms.0.alpha": "b638277a8690e175",
+    "decoder.layers.1.layer_norms.0.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.layer_norms.1.alpha": "b638277a8690e175",
+    "decoder.layers.1.layer_norms.1.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.layer_norms.2.alpha": "b638277a8690e175",
+    "decoder.layers.1.layer_norms.2.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.self_attention.W_k.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.self_attention.W_k.weight": "6986ab0ba60aded5",
+    "decoder.layers.1.self_attention.W_o.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.self_attention.W_o.weight": "1c5fa1b1927dcbc3",
+    "decoder.layers.1.self_attention.W_q.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.self_attention.W_q.weight": "559c59dc440ac20a",
+    "decoder.layers.1.self_attention.W_v.bias": "38723a2e5e8a17aa",
+    "decoder.layers.1.self_attention.W_v.weight": "c3b1b5a8e643e042",
+    "encoder.layers.0.attention.W_k.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.attention.W_k.weight": "bee97beebb75ece9",
+    "encoder.layers.0.attention.W_o.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.attention.W_o.weight": "f76df25e7516e5c3",
+    "encoder.layers.0.attention.W_q.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.attention.W_q.weight": "a536520c0f6129dd",
+    "encoder.layers.0.attention.W_v.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.attention.W_v.weight": "a4995a517b015c78",
+    "encoder.layers.0.feedforward.linear1.bias": "5341e6b2646979a7",
+    "encoder.layers.0.feedforward.linear1.weight": "0b2998ce4b25ec6a",
+    "encoder.layers.0.feedforward.linear2.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.feedforward.linear2.weight": "baa568ca8ee36701",
+    "encoder.layers.0.layer_norms.0.alpha": "b638277a8690e175",
+    "encoder.layers.0.layer_norms.0.bias": "38723a2e5e8a17aa",
+    "encoder.layers.0.layer_norms.1.alpha": "b638277a8690e175",
+    "encoder.layers.0.layer_norms.1.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.attention.W_k.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.attention.W_k.weight": "560923b2890c5edd",
+    "encoder.layers.1.attention.W_o.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.attention.W_o.weight": "347e117b87fc3aae",
+    "encoder.layers.1.attention.W_q.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.attention.W_q.weight": "7f6b51ab640c2ece",
+    "encoder.layers.1.attention.W_v.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.attention.W_v.weight": "ec71306114055523",
+    "encoder.layers.1.feedforward.linear1.bias": "5341e6b2646979a7",
+    "encoder.layers.1.feedforward.linear1.weight": "1f1b9cefd69cae13",
+    "encoder.layers.1.feedforward.linear2.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.feedforward.linear2.weight": "291c972c703ef0fa",
+    "encoder.layers.1.layer_norms.0.alpha": "b638277a8690e175",
+    "encoder.layers.1.layer_norms.0.bias": "38723a2e5e8a17aa",
+    "encoder.layers.1.layer_norms.1.alpha": "b638277a8690e175",
+    "encoder.layers.1.layer_norms.1.bias": "38723a2e5e8a17aa",
+    "output.linear.bias": "67042dfda5683aea",
+    "output.linear.weight": "123ce8642b705f9a",
+    "positional_encoder.PE": "e902199945cd3be6",
+    "src_embedding.E": "22a0c88645dcd474",
+    "tgt_embedding.E": "5829b04a9da40583"
+   },
+   "params": {
+    "decoder.layers.0.cross_attention.W_k.bias": [
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_k.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_o.bias": [
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_o.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_q.bias": [
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_q.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_v.bias": [
+     32
+    ],
+    "decoder.layers.0.cross_attention.W_v.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.feedforward.linear1.bias": [
+     64
+    ],
+    "decoder.layers.0.feedforward.linear1.weight": [
+     64,
+     32
+    ],
+    "decoder.layers.0.feedforward.linear2.bias": [
+     32
+    ],
+    "decoder.layers.0.feedforward.linear2.weight": [
+     32,
+     64
+    ],
+    "decoder.layers.0.layer_norms.0.alpha": [
+     32
+    ],
+    "decoder.layers.0.layer_norms.0.bias": [
+     32
+    ],
+    "decoder.layers.0.layer_norms.1.alpha": [
+     32
+    ],
+    "decoder.layers.0.layer_norms.1.bias": [
+     32
+    ],
+    "decoder.layers.0.layer_norms.2.alpha": [
+     32
+    ],
+    "decoder.layers.0.layer_norms.2.bias": [
+     32
+    ],
+    "decoder.layers.0.self_attention.W_k.bias": [
+     32
+    ],
+    "decoder.layers.0.self_attention.W_k.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.self_attention.W_o.bias": [
+     32
+    ],
+    "decoder.layers.0.self_attention.W_o.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.self_attention.W_q.bias": [
+     32
+    ],
+    "decoder.layers.0.self_attention.W_q.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.0.self_attention.W_v.bias": [
+     32
+    ],
+    "decoder.layers.0.self_attention.W_v.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_k.bias": [
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_k.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_o.bias": [
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_o.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_q.bias": [
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_q.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_v.bias": [
+     32
+    ],
+    "decoder.layers.1.cross_attention.W_v.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.feedforward.linear1.bias": [
+     64
+    ],
+    "decoder.layers.1.feedforward.linear1.weight": [
+     64,
+     32
+    ],
+    "decoder.layers.1.feedforward.linear2.bias": [
+     32
+    ],
+    "decoder.layers.1.feedforward.linear2.weight": [
+     32,
+     64
+    ],
+    "decoder.layers.1.layer_norms.0.alpha": [
+     32
+    ],
+    "decoder.layers.1.layer_norms.0.bias": [
+     32
+    ],
+    "decoder.layers.1.layer_norms.1.alpha": [
+     32
+    ],
+    "decoder.layers.1.layer_norms.1.bias": [
+     32
+    ],
+    "decoder.layers.1.layer_norms.2.alpha": [
+     32
+    ],
+    "decoder.layers.1.layer_norms.2.bias": [
+     32
+    ],
+    "decoder.layers.1.self_attention.W_k.bias": [
+     32
+    ],
+    "decoder.layers.1.self_attention.W_k.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.self_attention.W_o.bias": [
+     32
+    ],
+    "decoder.layers.1.self_attention.W_o.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.self_attention.W_q.bias": [
+     32
+    ],
+    "decoder.layers.1.self_attention.W_q.weight": [
+     32,
+     32
+    ],
+    "decoder.layers.1.self_attention.W_v.bias": [
+     32
+    ],
+    "decoder.layers.1.self_attention.W_v.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.0.attention.W_k.bias": [
+     32
+    ],
+    "encoder.layers.0.attention.W_k.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.0.attention.W_o.bias": [
+     32
+    ],
+    "encoder.layers.0.attention.W_o.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.0.attention.W_q.bias": [
+     32
+    ],
+    "encoder.layers.0.attention.W_q.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.0.attention.W_v.bias": [
+     32
+    ],
+    "encoder.layers.0.attention.W_v.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.0.feedforward.linear1.bias": [
+     64
+    ],
+    "encoder.layers.0.feedforward.linear1.weight": [
+     64,
+     32
+    ],
+    "encoder.layers.0.feedforward.linear2.bias": [
+     32
+    ],
+    "encoder.layers.0.feedforward.linear2.weight": [
+     32,
+     64
+    ],
+    "encoder.layers.0.layer_norms.0.alpha": [
+     32
+    ],
+    "encoder.layers.0.layer_norms.0.bias": [
+     32
+    ],
+    "encoder.layers.0.layer_norms.1.alpha": [
+     32
+    ],
+    "encoder.layers.0.layer_norms.1.bias": [
+     32
+    ],
+    "encoder.layers.1.attention.W_k.bias": [
+     32
+    ],
+    "encoder.layers.1.attention.W_k.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.1.attention.W_o.bias": [
+     32
+    ],
+    "encoder.layers.1.attention.W_o.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.1.attention.W_q.bias": [
+     32
+    ],
+    "encoder.layers.1.attention.W_q.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.1.attention.W_v.bias": [
+     32
+    ],
+    "encoder.layers.1.attention.W_v.weight": [
+     32,
+     32
+    ],
+    "encoder.layers.1.feedforward.linear1.bias": [
+     64
+    ],
+    "encoder.layers.1.feedforward.linear1.weight": [
+     64,
+     32
+    ],
+    "encoder.layers.1.feedforward.linear2.bias": [
+     32
+    ],
+    "encoder.layers.1.feedforward.linear2.weight": [
+     32,
+     64
+    ],
+    "encoder.layers.1.layer_norms.0.alpha": [
+     32
+    ],
+    "encoder.layers.1.layer_norms.0.bias": [
+     32
+    ],
+    "encoder.layers.1.layer_norms.1.alpha": [
+     32
+    ],
+    "encoder.layers.1.layer_norms.1.bias": [
+     32
+    ],
+    "output.linear.bias": [
+     200
+    ],
+    "output.linear.weight": [
+     200,
+     32
+    ],
+    "positional_encoder.PE": [
+     32,
+     32
+    ],
+    "src_embedding.E": [
+     200,
+     32
+    ],
+    "tgt_embedding.E": [
+     200,
+     32
+    ]
+   }
+  }
+ }
+}

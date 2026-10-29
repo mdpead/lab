@@ -42,7 +42,7 @@ def _shard_files(num_shards: int) -> list[str]:
 
 def get_dataset_pretrain(config: Config) -> dict[str, hf_datasets.Dataset]:
     """Raw StarCoder python files, split by repo. Rows carry a `content` column."""
-    ds_config = config["data"]["pretrain"]
+    ds_config = config["stages"]["pretrain"]["data"]
 
     num_shards = ds_config.get("num_shards")
     if num_shards is not None:
@@ -123,7 +123,7 @@ def _is_test(source: str, ratio: float) -> bool:
 
 def _sft_rows(config: Config) -> Iterator[dict[str, Any]]:
     """Yield prompt/completion rows from the synth generator, one per (record, task)."""
-    ds_config = config["data"]["sft"]
+    ds_config = config["stages"]["sft"]["data"]
     with_trace = ds_config["with_trace"]
     ratio = ds_config["test_split_ratio"]
 
@@ -143,7 +143,7 @@ def _sft_rows(config: Config) -> Iterator[dict[str, Any]]:
 
 def get_dataset_rl(config: Config) -> dict[str, list[dict[str, Any]]]:
     """Prompts only, plus the fields synth's checkers need to score a rollout."""
-    ds_config = config["data"]["rl"]
+    ds_config = config["stages"]["rl"]["data"]
 
     # A seed of its own, so these are not the functions sft trained on
     rows: list[dict[str, Any]] = []
@@ -313,7 +313,7 @@ def _check_token_budget(n_blocks: int, config: Config) -> None:
 
     Undersizing does not raise: the sampler loops, so training quietly repeats data.
     """
-    train_config = config["train"]["pretrain"]
+    train_config = config["stages"]["pretrain"]["train"]
     needed = (
         train_config["num_steps"]
         * train_config["effective_batch_token_size"]
@@ -323,7 +323,7 @@ def _check_token_budget(n_blocks: int, config: Config) -> None:
         logging.warning(
             f"pretrain: {n_blocks} blocks available but {needed} needed for "
             f"{train_config['num_steps']} steps — training will repeat data "
-            f"({needed / n_blocks:.2f} epochs). Raise data.pretrain.num_shards."
+            f"({needed / n_blocks:.2f} epochs). Raise stages.pretrain.data.num_shards."
         )
     else:
         logging.info(

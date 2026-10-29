@@ -16,7 +16,7 @@ jobs:
         include:
           - name: mlcore
             dir: .
-            paths: mlcore tests
+            paths: mlcore tests tools
             python: "3.13"
           - name: en_cy_translation
             dir: projects/en_cy_translation

@@ -6,7 +6,7 @@ from src.train import STAGE
 
 
 def test_unknown_dataset_raises(config):
-    config["data"][STAGE]["ds"] = "nope/unknown"
+    config["stages"][STAGE]["data"]["ds"] = "nope/unknown"
     with pytest.raises(ValueError, match="Unknown dataset"):
         datasets.get_dataset(STAGE, config)
 
@@ -16,7 +16,7 @@ def test_cardiff_loader_samples_and_splits(config, monkeypatch):
         train=Dataset.from_dict({"text_en": [str(i) for i in range(100)], "text_cy": ["x"] * 100})
     )
     monkeypatch.setattr(datasets.hf_datasets, "load_dataset", lambda name: full)
-    config["data"][STAGE]["sample_size"] = 40
+    config["stages"][STAGE]["data"]["sample_size"] = 40
 
     ds = datasets.get_dataset(STAGE, config)
 
@@ -36,9 +36,7 @@ def test_flores_loader_samples_each_split(config, monkeypatch):
         devtest=Dataset.from_dict({"text": list("ghijkl")}),
     )
     monkeypatch.setattr(datasets.hf_datasets, "load_dataset", lambda name: full)
-    config["data"]["eval"] = {"ds": "openlanguagedata/flores_plus", "sample_size": 2}
-
-    ds = datasets.get_dataset("eval", config)
+    ds = datasets.load_dataset({"ds": "openlanguagedata/flores_plus", "sample_size": 2}, 0)
 
     assert list(ds["dev"]["text"]) == ["a", "b"]
     assert list(ds["devtest"]["text"]) == ["g", "h"]

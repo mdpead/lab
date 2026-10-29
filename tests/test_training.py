@@ -19,20 +19,22 @@ def staged(tmp_path, make_model, tokenizer):
         "name": "t",
         "seed": 0,
         "locations": {"models_dir": str(tmp_path)},
-        "train": {
-            "pretrain": {},
+        "stages": {
+            "pretrain": {"train": {}},
             "sft": {
-                "device": DEV,
-                "learning_rate": 1e-4,
-                "adam_betas": [0.9, 0.95],
-                "adam_eps": 1e-8,
-                "label_smoothing": 0.0,
-                "warm_up_steps": 5,
+                "train": {
+                    "device": DEV,
+                    "learning_rate": 1e-4,
+                    "adam_betas": [0.9, 0.95],
+                    "adam_eps": 1e-8,
+                    "label_smoothing": 0.0,
+                    "warm_up_steps": 5,
+                }
             },
         },
     }
     pre = runs.get_stage_path(cfg, "pretrain")
-    tc = cfg["train"]["sft"]
+    tc = cfg["stages"]["sft"]["train"]
     _, opt, sched, scaler = training.create_training_objects(model, tc, tokenizer)
     for step in (100, 200):
         with torch.no_grad():  # make the two checkpoints differ
@@ -53,9 +55,10 @@ def test_seeds_a_fresh_stage_from_the_earlier_one(staged, make_model, tokenizer)
     run = training.get_run(
         runs.get_stage_path(cfg, "sft"),
         fresh,
-        {**cfg["train"]["sft"], "init_from_step": 200},
+        cfg["stages"]["sft"]["train"],
         tokenizer,
         init_from=pre,
+        init_from_step=200,
     )
 
     assert torch.equal(_first_param(fresh), _first_param(source)), "weights did not transfer"
@@ -68,25 +71,26 @@ def test_seeds_a_fresh_stage_from_the_earlier_one(staged, make_model, tokenizer)
 def test_init_from_step_selects_the_pinned_checkpoint(staged, make_model, tokenizer):
     cfg, pre, _ = staged
     a, b = make_model(len(tokenizer)).float(), make_model(len(tokenizer)).float()
-    tc = cfg["train"]["sft"]
+    tc = cfg["stages"]["sft"]["train"]
     training.get_run(
-        runs.get_stage_path(cfg, "sft"), a, {**tc, "init_from_step": 100}, tokenizer, init_from=pre
+        runs.get_stage_path(cfg, "sft"), a, tc, tokenizer, init_from=pre, init_from_step=100
     )
     training.get_run(
-        runs.get_stage_path(cfg, "sft"), b, {**tc, "init_from_step": 200}, tokenizer, init_from=pre
+        runs.get_stage_path(cfg, "sft"), b, tc, tokenizer, init_from=pre, init_from_step=200
     )
     assert not torch.equal(_first_param(a), _first_param(b))
 
 
 def test_missing_pinned_step_is_an_error(staged, make_model, tokenizer):
     cfg, pre, _ = staged
-    with pytest.raises(FileNotFoundError, match="init_from_step 999 not found"):
+    with pytest.raises(FileNotFoundError, match="init_from.step 999 not found"):
         training.get_run(
             runs.get_stage_path(cfg, "sft"),
             make_model(len(tokenizer)).float(),
-            {**cfg["train"]["sft"], "init_from_step": 999},
+            cfg["stages"]["sft"]["train"],
             tokenizer,
             init_from=pre,
+            init_from_step=999,
         )
 
 
@@ -95,7 +99,7 @@ def test_missing_source_stage_is_an_error(tmp_path, make_model, tokenizer):
         "name": "t",
         "seed": 0,
         "locations": {"models_dir": str(tmp_path)},
-        "train": {"sft": {"device": DEV}},
+        "stages": {"sft": {"train": {"device": DEV}}},
     }
     with pytest.raises(FileNotFoundError, match="No checkpoints in"):
         training.load_model_weights(
@@ -112,12 +116,12 @@ def test_resume_ignores_the_source_stage(staged, make_model, tokenizer):
     own = make_model(len(tokenizer)).float()
     with torch.no_grad():
         next(own.parameters()).fill_(-7.0)  # unmistakably not the pretrain weights
-    tc = cfg["train"]["sft"]
+    tc = cfg["stages"]["sft"]["train"]
     _, opt, sched, scaler = training.create_training_objects(own, tc, tokenizer)
     training.save_checkpoint(own, opt, sched, scaler, sft, 50, [])
 
     target = make_model(len(tokenizer)).float()
-    run = training.get_run(sft, target, {**tc, "init_from_step": 200}, tokenizer, init_from=pre)
+    run = training.get_run(sft, target, tc, tokenizer, init_from=pre, init_from_step=200)
 
     assert torch.equal(_first_param(target), _first_param(own)), "re-seeded instead of resuming"
     assert run["step_no"] == 50, "resume must restore the step counter"

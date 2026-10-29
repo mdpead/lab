@@ -6,9 +6,10 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import logging
 
 from mlcore import runs, tokenizer
-from mlcore.models import decoder_only
+from mlcore.models import build_model
 
 from src import data, dataloader, train
+from src.config import Config
 
 
 # Supervised fine-tuning on synth tasks: prompt in, trace and answer out, loss on the completion
@@ -16,8 +17,8 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    config = runs.parse_config()
-    runs.init_run(config, "sft")
+    config = runs.parse_config(Config)
+    runs.init_run(config, "sft", Config)
 
     # scripts/tokenizer.py trained the tokenizer; this only loads it
     token = tokenizer.load_tokenizer(runs.get_run_path(config))
@@ -28,19 +29,16 @@ def main() -> None:
 
     logging.info(f"sft rows: { {split: len(rows) for split, rows in ds.items()} }")
 
-    transformer = decoder_only.build_transformer(config)
+    transformer = build_model(config)
 
     # Rows are ragged, so batches come from a TokenSampler against a token budget
     dataloaders = dataloader.create_dataloaders_sft(ds, token, config)
 
-    # train.sft.init_from_step pins the pretrain checkpoint that seeds this stage.
+    # stages.sft.init_from names the pretrain checkpoint that seeds this stage.
     # Without it, sft trains from random init.
-    init_from = None
-    if "init_from_step" in config["train"]["sft"]:
-        init_from = runs.get_stage_path(config, "pretrain")
-    else:
-        logging.info("sft: no init_from_step, training from random init")
-    train.train("sft", transformer, dataloaders, token, config, init_from=init_from)
+    if config["stages"]["sft"].get("init_from") is None:
+        logging.info("sft: no init_from, training from random init")
+    train.train("sft", transformer, dataloaders, token, config)
 
 
 if __name__ == "__main__":

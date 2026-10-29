@@ -1,7 +1,12 @@
 import torch
 from torch import Tensor, nn
 
+from mlcore.config import Registry
 
+NORMS = Registry("norm", provided=("d_model",))
+
+
+@NORMS.register("rms")
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()
@@ -17,6 +22,7 @@ class RMSNorm(nn.Module):
         return out
 
 
+@NORMS.register("layer")
 class LayerNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()

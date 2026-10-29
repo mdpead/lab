@@ -5,6 +5,7 @@ import math
 import pytest
 import torch
 
+from mlcore.config import ConfigError
 from mlcore.layers import (
     Embedding,
     LayerNorm,
@@ -12,17 +13,20 @@ from mlcore.layers import (
     PositionWiseFeedForward,
     SinusoidalPositionalEncoding,
 )
-from mlcore.models import encoder_decoder
+from mlcore.models import build_model, encoder_decoder, parse_model
 
 CONFIG = {
     "model": {
+        "type": "encoder_decoder",
         "d_model": 32,
-        "num_heads": 4,
-        "max_length": 32,
-        "d_ff": 64,
         "num_enc_layers": 2,
         "num_dec_layers": 2,
+        "max_length": 32,
         "dropout": 0.1,
+        "norm": {"type": "layer"},
+        "position": {"type": "sinusoidal"},
+        "attention": {"type": "mha", "num_heads": 4},
+        "feedforward": {"type": "relu", "d_ff": 64, "bias": True},
     },
     "tokenizer": {"vocab_size": 60},
 }
@@ -31,7 +35,7 @@ CONFIG = {
 @pytest.fixture
 def transformer():
     torch.manual_seed(0)
-    return encoder_decoder.build_transformer(CONFIG)
+    return build_model(CONFIG)
 
 
 def test_layer_norm_normalises_last_dim():
@@ -79,20 +83,24 @@ def test_attention_ignores_masked_keys():
     assert torch.allclose(out, attn(q, kv_changed, kv_changed, mask), atol=1e-6)
 
 
+def _small_config():
+    return parse_model({**CONFIG["model"], "d_model": 16, "num_dec_layers": 1})
+
+
 def test_decoder_self_attn_mask_is_causal_and_padded():
     padding = torch.tensor([[True, True, False]])
-    mask = encoder_decoder.Decoder(16, 4, 32, 1, 0.0).make_self_attn_mask(padding, padding)
+    mask = encoder_decoder.Decoder(_small_config()).make_self_attn_mask(padding, padding)
     assert mask.tolist() == [[[True, False, False], [True, True, False], [False, False, False]]]
 
 
 def test_cross_attn_mask_hides_source_padding():
     tgt = torch.tensor([[True, True]])
     src = torch.tensor([[True, False, False]])
-    mask = encoder_decoder.Decoder(16, 4, 32, 1, 0.0).make_cross_attn_mask(tgt, src)
+    mask = encoder_decoder.Decoder(_small_config()).make_cross_attn_mask(tgt, src)
     assert mask.tolist() == [[[True, False, False], [True, False, False]]]
 
 
-def test_build_transformer_output_shape(transformer):
+def test_build_model_output_shape(transformer):
     src = torch.randint(5, 50, (2, 7))
     tgt = torch.randint(5, 50, (2, 4))
     out = transformer(
@@ -148,3 +156,23 @@ def test_can_overfit_single_example(transformer):
 
     transformer.eval()
     assert torch.equal(transformer(src, tgt[:, :-1], *masks).argmax(-1), tgt[:, 1:])
+
+
+def test_a_dense_feedforward_can_be_swapped_in():
+    """Components are chosen by config: SwiGLU in place of the ReLU feed-forward."""
+    torch.manual_seed(0)
+    model = build_model(
+        {**CONFIG, "model": {**CONFIG["model"], "feedforward": {"type": "swiglu", "d_ff": 64}}}
+    )
+    assert "encoder.layers.0.feedforward.gate.weight" in model.state_dict()
+    src = torch.randint(5, 50, (2, 7))
+    tgt = torch.randint(5, 50, (2, 4))
+    masks = torch.ones(2, 7, dtype=torch.bool), torch.ones(2, 4, dtype=torch.bool)
+    assert model(src, tgt, *masks).shape == (2, 4, 60)
+
+
+def test_a_mixture_of_experts_is_rejected_for_the_encoder_decoder():
+    moe = {"type": "moe", "d_ff": 64, "num_experts": 4, "top_k": 2, "capacity_factor": 1.0}
+    message = r"model\.feedforward: feedforward type 'moe' is not supported here"
+    with pytest.raises(ConfigError, match=message + r" \(one of: relu, swiglu\)"):
+        parse_model({**CONFIG["model"], "feedforward": moe})

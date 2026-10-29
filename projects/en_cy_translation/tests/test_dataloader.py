@@ -7,7 +7,7 @@ from src.train import STAGE
 
 
 def test_batches_fit_the_padded_token_budget(ds_tokenized, config):
-    budget = config["train"][STAGE]["minibatch_token_size"]
+    budget = config["stages"][STAGE]["train"]["minibatch_token_size"]
     loader = dataloader.create_dataloaders(ds_tokenized, config, STAGE)["train"]
 
     for batch in itertools.islice(loader, 20):
