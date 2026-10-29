@@ -27,7 +27,9 @@ pipe = pipeline("translation", model="mdpead/en-cy-translation")
 pipe("Hello, how are you?")
 ```
 
-Or with the model and tokenizer directly:
+Or with the model and tokenizer directly. `EnCyForTranslation` is defined in this project's
+`src/hf_wrapper.py`, so run this from `projects/en_cy_translation` in the
+[lab repo](https://github.com/mdpead/lab):
 
 ```python
 from src.hf_wrapper import EnCyForTranslation
