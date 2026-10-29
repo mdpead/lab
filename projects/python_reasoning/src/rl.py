@@ -485,14 +485,3 @@ def train_loop(
         )
 
     return None
-
-
-def train_rl(
-    stage: str,
-    model: Transformer,
-    dataloaders: dict[str, DataLoader],
-    tokenizer: PreTrainedTokenizerFast,
-    config: Config,
-) -> None:
-    """Run the RL stage: training.train's bookkeeping, this module's loop."""
-    return training.train(stage, model, dataloaders, tokenizer, config, loop=train_loop)

@@ -100,8 +100,9 @@ TrainLoop = Callable[
     [str, nn.Module, dict[str, DataLoader], PreTrainedTokenizerFast, Run, runs.Config], None
 ]
 
-# A minibatch's loss to backpropagate, and the named values to log for it
-ComputeLoss = Callable[[nn.Module, dict[str, Any]], tuple[Tensor, dict[str, Tensor]]]
+# A minibatch's loss to backpropagate, and the named values to log for it, given the model,
+# the batch and the stage's criterion
+ComputeLoss = Callable[[nn.Module, dict[str, Any], nn.Module], tuple[Tensor, dict[str, Tensor]]]
 
 # Extra validation results from one minibatch, such as BLEU from generated text
 ValidationMetrics = Callable[[nn.Module, dict[str, Any]], dict[str, float]]
@@ -455,8 +456,9 @@ def supervised_loop(
 ) -> None:
     """Step through the train split with gradient accumulation, validating and checkpointing.
 
-    The project supplies the forward pass and loss as `compute_loss`. `tokens_key` names the
-    batch field whose non-pad tokens are counted for throughput.
+    The project supplies the forward pass and loss as `compute_loss`, which is given the run's
+    criterion. `tokens_key` names the batch field whose non-pad tokens are counted for
+    throughput.
     """
 
     train_config = config["stages"][stage]["train"]
@@ -477,6 +479,10 @@ def supervised_loop(
     results = run["results"]
     step_no = run["step_no"]
     run_path = run["run_path"]
+    criterion = run["criterion"]
+
+    def batch_loss(model: nn.Module, batch: dict[str, Any]) -> tuple[Tensor, dict[str, Tensor]]:
+        return compute_loss(model, batch, criterion)
 
     batch_tokens = 0
     start_time = time.time()
@@ -490,7 +496,7 @@ def supervised_loop(
         batch = _to_device(batch, device)
 
         with amp.autocast(device_type=device.type):
-            loss, logged = compute_loss(model, batch)
+            loss, logged = batch_loss(model, batch)
 
         batch_tokens += batch[tokens_key].ne(tokenizer.pad_token_id).sum().item()
 
@@ -531,7 +537,7 @@ def supervised_loop(
             validation_result = validation_step(
                 model,
                 dataloaders["test"],
-                compute_loss,
+                batch_loss,
                 tokens_key,
                 tokenizer.pad_token_id,
                 device,
@@ -576,13 +582,14 @@ def train(
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,
     *,
-    loop: TrainLoop,
+    loop: TrainLoop | None = None,
+    **loop_options: Any,
 ) -> None:
-    """Run a stage. The first time it runs, `stages.<stage>.init_from` names the earlier stage
-    whose weights it starts from, if any.
+    """Run a stage: resume it, or start it from `stages.<stage>.init_from` the first time,
+    then train it with `supervised_loop`, given `loop_options` (`compute_loss`, `tokens_key`
+    and optionally `validation_metrics`).
 
-    `loop` is the stage's training loop, supplied by the project, so stages share the
-    resume and already-complete handling here.
+    A stage that is not supervised training, such as RL, passes its own `loop` instead.
     """
 
     stage_config = config["stages"][stage]
@@ -602,6 +609,7 @@ def train(
     if train_config.get("compile_model", False):
         model = torch.compile(model, fullgraph=True)
 
-    loop(stage, model, dataloaders, tokenizer, run, config)
+    # Looked up when called, not as a default argument, so tests can replace it
+    (loop or supervised_loop)(stage, model, dataloaders, tokenizer, run, config, **loop_options)
 
     return None

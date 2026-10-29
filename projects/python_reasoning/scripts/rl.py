@@ -5,7 +5,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import logging
 
-from lab import runs, tokenizer
+from lab import runs, tokenizer, training
 from lab.models import build_model
 
 from src import data, dataloader, rl
@@ -35,7 +35,7 @@ def main() -> None:
 
     # Starts from SFT (stages.rl.init_from): a pretrained model never emits the answer
     # marker, so every reward would be 0.
-    rl.train_rl("rl", transformer, dataloaders, token, config)
+    training.train("rl", transformer, dataloaders, token, config, loop=rl.train_loop)
 
 
 if __name__ == "__main__":

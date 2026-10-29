@@ -261,8 +261,8 @@ def test_sft_collate_targets_are_long_for_cross_entropy(tokenizer):
     assert batch["output_ids"].dtype == torch.int64
 
 
-def test_sft_collate_returns_the_keys_the_train_loop_reads(tokenizer):
-    """Same keys as collate_lm_batch, so train_loop and validation_step are stage-agnostic."""
+def test_sft_collate_returns_the_keys_the_supervised_loop_reads(tokenizer):
+    """Same keys as collate_lm_batch, so the supervised loop works the same for both stages."""
     pad = tokenizer.pad_token_id
     batch = collate_sft_batch([_sft_row(n=6, prompt_len=3, pad_id=pad)], pad)
     assert set(batch) == {"input_ids", "padding_mask", "output_ids"}

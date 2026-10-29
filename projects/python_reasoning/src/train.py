@@ -19,30 +19,6 @@ def compute_loss(
     return loss, {"loss_ce": loss_ce, "loss_aux": loss_aux}
 
 
-def train_loop(
-    stage: str,
-    model: Transformer,
-    dataloaders: dict[str, DataLoader],
-    tokenizer: PreTrainedTokenizerFast,
-    run: training.Run,
-    config: runs.Config,
-) -> None:
-    training.supervised_loop(
-        stage,
-        model,
-        dataloaders,
-        tokenizer,
-        run,
-        config,
-        compute_loss=partial(
-            compute_loss,
-            criterion=run["criterion"],
-            router_aux_loss_coef=config["stages"][stage]["train"]["router_aux_loss_coef"],
-        ),
-        tokens_key="input_ids",
-    )
-
-
 def train(
     stage: str,
     model: Transformer,
@@ -50,5 +26,16 @@ def train(
     tokenizer: PreTrainedTokenizerFast,
     config: runs.Config,
 ) -> None:
-    """Run a pretrain or SFT stage: training.train's bookkeeping, this module's loop."""
-    return training.train(stage, model, dataloaders, tokenizer, config, loop=train_loop)
+    """Run a pretrain or SFT stage: lab's supervised loop with this module's loss."""
+    training.train(
+        stage,
+        model,
+        dataloaders,
+        tokenizer,
+        config,
+        compute_loss=partial(
+            compute_loss,
+            router_aux_loss_coef=config["stages"][stage]["train"]["router_aux_loss_coef"],
+        ),
+        tokens_key="input_ids",
+    )
