@@ -15,7 +15,7 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
 from lab.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS
-from lab.models.decoder_only import ModelConfig, Transformer
+from lab.models.decoder_only import Transformer
 
 
 def pytest_addoption(parser):
@@ -104,7 +104,8 @@ def make_model():
         capacity_factor=4.0,
     ):
         torch.manual_seed(0)
-        config = ModelConfig(
+        model = Transformer(
+            vocab_size,
             d_model=64,
             num_layers=num_layers,
             max_length=max_length,
@@ -123,7 +124,6 @@ def make_model():
                 capacity_factor=capacity_factor,
             ),
         )
-        model = Transformer(config, vocab_size)
         return model.to("cuda").to(torch.float16).eval()
 
     return _make

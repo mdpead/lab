@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from lab.config import Component
-from lab.models import MODELS, decoder_only
+from lab.models import MODELS
 from lab.runs import RunConfig
 from lab.tokenizer import TOKENIZERS
 from lab.training import StageConfig, SupervisedStage, TrainStage
@@ -94,6 +94,6 @@ class Stages:
 
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
-    model: Annotated[decoder_only.ModelConfig, MODELS]
+    model: Annotated[Component, MODELS.only("decoder_only")]
     tokenizer: Annotated[Component, TOKENIZERS.only("bpe")]
     stages: Stages

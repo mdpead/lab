@@ -149,7 +149,7 @@ configs/base.yaml: model.feedforward: feedforward type 'moe' is not supported he
 | Part | Declared by |
 |---|---|
 | `name`, `seed`, `locations` | `runs.RunConfig` |
-| `model` | the family's `ModelConfig` (`decoder_only`, `encoder_decoder`), chosen by `type`; each component block by its layer's constructor |
+| `model` | the model class's constructor (`decoder_only`, `encoder_decoder`), chosen by `type`; each component block by its layer's constructor |
 | `stages.<stage>.init_from` | `training.InitFrom`: the earlier stage, and optionally the checkpoint step, a stage's weights start from |
 | `stages.<stage>.train` | `training.TrainStage` (any stage) or `SupervisedStage` (a stage `supervised_loop` runs), with the project's own fields added |
 | `tokenizer` | the tokenizer's constructor, chosen by `type`: `wordpiece` or `bpe` (`lab.tokenizer.TOKENIZERS`) |

@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Annotated
 
 import torch
@@ -17,38 +16,23 @@ from lab.layers import (
 from lab.models.registry import MODELS
 
 
-@MODELS.register("decoder_only")
-@dataclass(frozen=True, kw_only=True)
-class ModelConfig:
-    """A pre-norm decoder-only Transformer, as the `model` section describes it.
-
-    The vocabulary size comes from `tokenizer.vocab_size`.
-    """
-
-    d_model: int
-    num_layers: int
-    max_length: int
-    dropout: float
-    norm: Annotated[Component, NORMS]
-    position: Annotated[Component, POSITIONS.only("rope")]
-    attention: Annotated[Component, ATTENTIONS.only("gqa")]
-    feedforward: Annotated[Component, FEEDFORWARDS]
-
-    def build(self, vocab_size: int) -> "Transformer":
-        return Transformer(self, vocab_size).apply(init_weights)
-
-
 class DecoderLayer(nn.Module):
-    def __init__(self, config: ModelConfig, rope_layer: RotaryPositionalEncoding) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        dropout: float,
+        norm: Component,
+        attention: Component,
+        feedforward: Component,
+        rope_layer: RotaryPositionalEncoding,
+    ) -> None:
         super().__init__()
-        self.attention = config.attention.build(d_model=config.d_model, rope_layer=rope_layer)
-        self.feedforward = config.feedforward.build(d_model=config.d_model)
+        self.attention = attention.build(d_model=d_model, rope_layer=rope_layer)
+        self.feedforward = feedforward.build(d_model=d_model)
         # A mixture of experts takes the padding mask and adds a load-balancing loss
         self.feedforward_has_aux = isinstance(self.feedforward, MixtureOfExpertsFeedForward)
-        self.layer_norms = nn.ModuleList(
-            [config.norm.build(d_model=config.d_model) for _ in range(0, 2)]
-        )
-        self.dropout = nn.Dropout(config.dropout)
+        self.layer_norms = nn.ModuleList([norm.build(d_model=d_model) for _ in range(0, 2)])
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
         self,
@@ -68,15 +52,26 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        num_layers: int,
+        max_length: int,
+        dropout: float,
+        norm: Component,
+        position: Component,
+        attention: Component,
+        feedforward: Component,
+    ) -> None:
         super().__init__()
-        self.rope_layer = config.position.build(
-            d_h=config.attention["d_h"], max_length=config.max_length
-        )
+        self.rope_layer = position.build(d_h=attention["d_h"], max_length=max_length)
         self.decoder_layers = nn.ModuleList(
-            [DecoderLayer(config, self.rope_layer) for _ in range(config.num_layers)]
+            [
+                DecoderLayer(d_model, dropout, norm, attention, feedforward, self.rope_layer)
+                for _ in range(num_layers)
+            ]
         )
-        self.final_norm = config.norm.build(d_model=config.d_model)
+        self.final_norm = norm.build(d_model=d_model)
 
     def forward(
         self,
@@ -99,18 +94,36 @@ class Decoder(nn.Module):
         return x, loss_aux, new_kv
 
 
+@MODELS.register("decoder_only")
 class Transformer(nn.Module):
-    def __init__(self, config: ModelConfig, vocab_size: int) -> None:
+    """A pre-norm decoder-only Transformer. Its constructor is the config's `model` section,
+    and the vocabulary size comes from `tokenizer.vocab_size`."""
+
+    def __init__(
+        self,
+        vocab_size: int,
+        *,
+        d_model: int,
+        num_layers: int,
+        max_length: int,
+        dropout: float,
+        norm: Annotated[Component, NORMS],
+        position: Annotated[Component, POSITIONS.only("rope")],
+        attention: Annotated[Component, ATTENTIONS.only("gqa")],
+        feedforward: Annotated[Component, FEEDFORWARDS],
+    ) -> None:
         super().__init__()
-        self.config = config
         # context bound: RoPE table size and training seq length
-        self.max_length = config.max_length
-        self.num_kv_heads = config.attention["num_kv_heads"]
-        self.d_h = config.attention["d_h"]
-        self.num_layers = config.num_layers
-        self.embedding = Embedding(vocab_size, config.d_model)
-        self.decoder = Decoder(config)
-        self.dropout = nn.Dropout(config.dropout)
+        self.max_length = max_length
+        self.num_kv_heads = attention["num_kv_heads"]
+        self.d_h = attention["d_h"]
+        self.num_layers = num_layers
+        self.embedding = Embedding(vocab_size, d_model)
+        self.decoder = Decoder(
+            d_model, num_layers, max_length, dropout, norm, position, attention, feedforward
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.apply(init_weights)
 
     def forward(
         self,
