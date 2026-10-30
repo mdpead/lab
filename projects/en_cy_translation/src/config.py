@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from lab.config import Component
-from lab.models import MODELS, encoder_decoder
+from lab.models import MODELS
 from lab.runs import RunConfig
 from lab.tokenizer import TOKENIZERS
 from lab.training import StageConfig, SupervisedStage
@@ -30,6 +30,6 @@ class Stages:
 
 @dataclass(frozen=True, kw_only=True)
 class Config(RunConfig):
-    model: Annotated[encoder_decoder.ModelConfig, MODELS]
+    model: Annotated[Component, MODELS.only("encoder_decoder")]
     tokenizer: Annotated[Component, TOKENIZERS.only("wordpiece")]
     stages: Stages

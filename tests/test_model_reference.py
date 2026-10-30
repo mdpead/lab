@@ -12,8 +12,15 @@ import pytest
 import torch
 
 from lab.config import ConfigError
-from lab.layers import MixtureOfExpertsFeedForward, SwiGLUFeedForward
-from lab.models import build_model, parse_model
+from lab.layers import (
+    ATTENTIONS,
+    FEEDFORWARDS,
+    NORMS,
+    POSITIONS,
+    MixtureOfExpertsFeedForward,
+    SwiGLUFeedForward,
+)
+from lab.models import build_model, decoder_only, parse_model
 
 REFERENCE = json.load(open("tests/fixtures/model_reference.json"))["tiny"]
 
@@ -73,6 +80,26 @@ def test_seeded_model_matches_the_reference_weight_for_weight(family):
     expected = REFERENCE[family]
     assert {k: list(v.shape) for k, v in state.items()} == expected["params"]
     assert {k: _hash(v) for k, v in state.items()} == expected["hashes"]
+
+
+def test_a_model_built_in_code_matches_the_one_from_config():
+    torch.manual_seed(0)
+    in_code = decoder_only.Transformer(
+        100,
+        d_model=64,
+        num_layers=2,
+        max_length=64,
+        dropout=0.0,
+        norm=NORMS.component("rms"),
+        position=POSITIONS.component("rope"),
+        attention=ATTENTIONS.component("gqa", num_heads=4, num_kv_heads=2, d_h=16),
+        feedforward=FEEDFORWARDS.component(
+            "moe", d_ff=128, num_experts=4, top_k=2, capacity_factor=4.0
+        ),
+    )
+    assert {k: _hash(v) for k, v in in_code.state_dict().items()} == (
+        REFERENCE["decoder_only"]["hashes"]
+    )
 
 
 def test_unknown_component_type_suggests_the_closest():

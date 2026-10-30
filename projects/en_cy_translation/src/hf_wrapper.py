@@ -3,8 +3,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 from lab import runs, training
+from lab.config import Component
 from lab.models import parse_model
-from lab.models.encoder_decoder import ModelConfig, Transformer
+from lab.models.encoder_decoder import Transformer
 from transformers import GenerationMixin, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 
@@ -51,7 +52,7 @@ class EnCyConfig(PretrainedConfig):
 _FLAT_FIELDS = ("d_model", "num_heads", "d_ff", "num_enc_layers", "num_dec_layers", "max_length")
 
 
-def _model_config(flat: dict[str, Any]) -> ModelConfig:
+def _model_config(flat: dict[str, Any]) -> Component:
     """The architecture the Hub format describes: the original one, with these sizes."""
     model = {
         "type": "encoder_decoder",
@@ -68,16 +69,16 @@ def _model_config(flat: dict[str, Any]) -> ModelConfig:
     return parse_model(model, "encoder_decoder")
 
 
-def _flat_fields(model_config: ModelConfig) -> dict[str, Any]:
+def _flat_fields(model_config: Component) -> dict[str, Any]:
     """EnCyConfig's fields for a model config, which must be the architecture they imply."""
     flat = {
-        "d_model": model_config.d_model,
-        "num_heads": model_config.attention["num_heads"],
-        "d_ff": model_config.feedforward["d_ff"],
-        "num_enc_layers": model_config.num_enc_layers,
-        "num_dec_layers": model_config.num_dec_layers,
-        "max_length": model_config.max_length,
-        "dropout": model_config.dropout,
+        "d_model": model_config["d_model"],
+        "num_heads": model_config["attention"]["num_heads"],
+        "d_ff": model_config["feedforward"]["d_ff"],
+        "num_enc_layers": model_config["num_enc_layers"],
+        "num_dec_layers": model_config["num_dec_layers"],
+        "max_length": model_config["max_length"],
+        "dropout": model_config["dropout"],
     }
     if _model_config(flat) != model_config:
         raise ValueError(
@@ -115,7 +116,7 @@ class EnCyForTranslation(PreTrainedModel, GenerationMixin):
     def __init__(self, config: EnCyConfig) -> None:
         super().__init__(config)
         flat = {name: getattr(config, name) for name in (*_FLAT_FIELDS, "dropout")}
-        self.transformer = Transformer(_model_config(flat), config.vocab_size)
+        self.transformer: Transformer = _model_config(flat).build(vocab_size=config.vocab_size)
         self.post_init()
 
     def get_encoder(self) -> _EncoderWrapper:

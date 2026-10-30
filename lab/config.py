@@ -43,9 +43,9 @@ def resumable_keys(cls: type) -> frozenset[str]:
 class Registry:
     """Named implementations of one kind of component.
 
-    An entry is either a config dataclass, checked field by field, or a class such as a layer,
-    checked against its constructor: the arguments the model passes in (`provided`) are left
-    out, and the rest are the block's settings, with the constructor's defaults and type hints.
+    An entry is a class, such as a layer or a whole model, checked against its constructor:
+    the arguments the code passes in (`provided`) are left out, and the rest are the block's
+    settings, with the constructor's defaults and type hints.
     A class may define `check_config(**settings)`, raising ValueError, for checks across
     settings that should fail when the config loads rather than when the model is built.
     """
@@ -320,8 +320,6 @@ def _convert_registered(registry: Registry, allowed: list[str], value: Any, path
 
     cls = registry.get(name)
     settings = {k: v for k, v in value.items() if k != "type"}
-    if dataclasses.is_dataclass(cls):
-        return _convert_dataclass(cls, settings, path)
     return _convert_component(registry, name, cls, settings, path)
 
 
@@ -329,7 +327,8 @@ def _convert_component(
     registry: Registry, name: str, cls: type, settings: dict[str, Any], path: str
 ) -> Component:
     """Check a component block against its class's constructor."""
-    hints = typing.get_type_hints(cls.__init__)
+    # Extras kept, so a constructor argument can itself be a registered component
+    hints = typing.get_type_hints(cls.__init__, include_extras=True)
     params = {
         p.name: p
         for p in inspect.signature(cls).parameters.values()

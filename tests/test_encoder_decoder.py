@@ -13,7 +13,7 @@ from lab.layers import (
     PositionWiseFeedForward,
     SinusoidalPositionalEncoding,
 )
-from lab.models import build_model, encoder_decoder, parse_model
+from lab.models import build_model, parse_model
 
 CONFIG = {
     "model": {
@@ -83,20 +83,21 @@ def test_attention_ignores_masked_keys():
     assert torch.allclose(out, attn(q, kv_changed, kv_changed, mask), atol=1e-6)
 
 
-def _small_config():
-    return parse_model({**CONFIG["model"], "d_model": 16, "num_dec_layers": 1})
+def _small_decoder():
+    small = {**CONFIG["model"], "d_model": 16, "num_dec_layers": 1}
+    return build_model({**CONFIG, "model": small}).decoder
 
 
 def test_decoder_self_attn_mask_is_causal_and_padded():
     padding = torch.tensor([[True, True, False]])
-    mask = encoder_decoder.Decoder(_small_config()).make_self_attn_mask(padding, padding)
+    mask = _small_decoder().make_self_attn_mask(padding, padding)
     assert mask.tolist() == [[[True, False, False], [True, True, False], [False, False, False]]]
 
 
 def test_cross_attn_mask_hides_source_padding():
     tgt = torch.tensor([[True, True]])
     src = torch.tensor([[True, False, False]])
-    mask = encoder_decoder.Decoder(_small_config()).make_cross_attn_mask(tgt, src)
+    mask = _small_decoder().make_cross_attn_mask(tgt, src)
     assert mask.tolist() == [[[True, False, False], [True, False, False]]]
 
 

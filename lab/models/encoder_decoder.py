@@ -4,8 +4,7 @@ Attribute names are part of the saved weights, published models included: renami
 breaks loading them.
 """
 
-from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 import torch
 from torch import Tensor, nn
@@ -15,45 +14,20 @@ from lab.layers import ATTENTIONS, FEEDFORWARDS, NORMS, POSITIONS, Embedding
 from lab.models.registry import MODELS
 
 
-@MODELS.register("encoder_decoder")
-@dataclass(frozen=True, kw_only=True)
-class ModelConfig:
-    """A post-norm encoder-decoder Transformer, as the `model` section describes it.
-
-    The vocabulary size comes from `tokenizer.vocab_size`.
-    """
-
-    d_model: int
-    num_enc_layers: int
-    num_dec_layers: int
-    max_length: int
-    dropout: float
-    norm: Annotated[Component, NORMS]
-    position: Annotated[Component, POSITIONS.only("sinusoidal")]
-    attention: Annotated[Component, ATTENTIONS.only("mha")]
-    # A mixture of experts returns an auxiliary loss, which this model has no place for
-    feedforward: Annotated[Component, FEEDFORWARDS.only("relu", "swiglu")]
-
-    def __post_init__(self) -> None:
-        if self.d_model % self.attention["num_heads"]:
-            raise ValueError(
-                f"d_model ({self.d_model}) must be a multiple of attention.num_heads "
-                f"({self.attention['num_heads']})"
-            )
-
-    def build(self, vocab_size: int) -> "Transformer":
-        return Transformer(self, vocab_size).apply(init_weights)
-
-
 class EncoderLayer(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        dropout: float,
+        norm: Component,
+        attention: Component,
+        feedforward: Component,
+    ) -> None:
         super().__init__()
-        self.attention = config.attention.build(d_model=config.d_model, dropout=config.dropout)
-        self.feedforward = config.feedforward.build(d_model=config.d_model)
-        self.layer_norms = nn.ModuleList(
-            [config.norm.build(d_model=config.d_model) for _ in range(0, 2)]
-        )
-        self.dropout = nn.Dropout(config.dropout)
+        self.attention = attention.build(d_model=d_model, dropout=dropout)
+        self.feedforward = feedforward.build(d_model=d_model)
+        self.layer_norms = nn.ModuleList([norm.build(d_model=d_model) for _ in range(0, 2)])
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, src: Tensor, attn_mask: Tensor) -> Tensor:
         x = src
@@ -65,9 +39,22 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        num_layers: int,
+        dropout: float,
+        norm: Component,
+        attention: Component,
+        feedforward: Component,
+    ) -> None:
         super().__init__()
-        self.layers = nn.ModuleList([EncoderLayer(config) for _ in range(config.num_enc_layers)])
+        self.layers = nn.ModuleList(
+            [
+                EncoderLayer(d_model, dropout, norm, attention, feedforward)
+                for _ in range(num_layers)
+            ]
+        )
 
     def make_attn_mask(self, q_padding_mask: Tensor, k_padding_mask: Tensor) -> Tensor:
         padding_mask = q_padding_mask.unsqueeze(-1) & k_padding_mask.unsqueeze(-2)
@@ -81,17 +68,20 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        dropout: float,
+        norm: Component,
+        attention: Component,
+        feedforward: Component,
+    ) -> None:
         super().__init__()
-        self.self_attention = config.attention.build(d_model=config.d_model, dropout=config.dropout)
-        self.cross_attention = config.attention.build(
-            d_model=config.d_model, dropout=config.dropout
-        )
-        self.feedforward = config.feedforward.build(d_model=config.d_model)
-        self.layer_norms = nn.ModuleList(
-            [config.norm.build(d_model=config.d_model) for _ in range(0, 3)]
-        )
-        self.dropout = nn.Dropout(config.dropout)
+        self.self_attention = attention.build(d_model=d_model, dropout=dropout)
+        self.cross_attention = attention.build(d_model=d_model, dropout=dropout)
+        self.feedforward = feedforward.build(d_model=d_model)
+        self.layer_norms = nn.ModuleList([norm.build(d_model=d_model) for _ in range(0, 3)])
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
         self,
@@ -111,9 +101,22 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        num_layers: int,
+        dropout: float,
+        norm: Component,
+        attention: Component,
+        feedforward: Component,
+    ) -> None:
         super().__init__()
-        self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.num_dec_layers)])
+        self.layers = nn.ModuleList(
+            [
+                DecoderLayer(d_model, dropout, norm, attention, feedforward)
+                for _ in range(num_layers)
+            ]
+        )
 
     def make_self_attn_mask(self, q_padding_mask: Tensor, k_padding_mask: Tensor) -> Tensor:
         padding_mask = q_padding_mask.unsqueeze(-1) & k_padding_mask.unsqueeze(-2)
@@ -154,19 +157,43 @@ class Output(nn.Module):
         return x
 
 
+@MODELS.register("encoder_decoder")
 class Transformer(nn.Module):
-    def __init__(self, config: ModelConfig, vocab_size: int) -> None:
+    """A post-norm encoder-decoder Transformer. Its constructor is the config's `model`
+    section, and the vocabulary size comes from `tokenizer.vocab_size`."""
+
+    def __init__(
+        self,
+        vocab_size: int,
+        *,
+        d_model: int,
+        num_enc_layers: int,
+        num_dec_layers: int,
+        max_length: int,
+        dropout: float,
+        norm: Annotated[Component, NORMS],
+        position: Annotated[Component, POSITIONS.only("sinusoidal")],
+        attention: Annotated[Component, ATTENTIONS.only("mha")],
+        # A mixture of experts returns an auxiliary loss, which this model has no place for
+        feedforward: Annotated[Component, FEEDFORWARDS.only("relu", "swiglu")],
+    ) -> None:
         super().__init__()
-        self.config = config
-        self.src_embedding = Embedding(vocab_size, config.d_model)
-        self.tgt_embedding = Embedding(vocab_size, config.d_model)
-        self.positional_encoder = config.position.build(
-            d_model=config.d_model, max_length=config.max_length
-        )
-        self.encoder = Encoder(config)
-        self.decoder = Decoder(config)
-        self.output = Output(config.d_model, vocab_size)
-        self.dropout = nn.Dropout(config.dropout)
+        self.src_embedding = Embedding(vocab_size, d_model)
+        self.tgt_embedding = Embedding(vocab_size, d_model)
+        self.positional_encoder = position.build(d_model=d_model, max_length=max_length)
+        self.encoder = Encoder(d_model, num_enc_layers, dropout, norm, attention, feedforward)
+        self.decoder = Decoder(d_model, num_dec_layers, dropout, norm, attention, feedforward)
+        self.output = Output(d_model, vocab_size)
+        self.dropout = nn.Dropout(dropout)
+        self.apply(init_weights)
+
+    @staticmethod
+    def check_config(d_model: int, attention: Component, **_: Any) -> None:
+        if d_model % attention["num_heads"]:
+            raise ValueError(
+                f"d_model ({d_model}) must be a multiple of attention.num_heads "
+                f"({attention['num_heads']})"
+            )
 
     def encode(self, src: Tensor, src_padding_mask: Tensor) -> Tensor:
         src_emb = self.dropout(self.positional_encoder(self.src_embedding(src)))
